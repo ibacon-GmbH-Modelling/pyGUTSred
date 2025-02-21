@@ -1,0 +1,253 @@
+import time
+import pandas as pd
+import numpy as np
+import scipy as sp
+import models
+import parspace
+import matplotlib.pyplot as plt
+
+class concclass:
+    def __init__(self,concdata):
+        self.concdata = concdata
+        self.ntreats = concdata.shape[1] - 1
+        self.time = concdata[:,0]
+        self.concarray = np.transpose(concdata[:,1:])
+        self.concslopes = np.zeros_like(self.concarray)
+        self.conctwa = np.zeros(self.ntreats)
+        # array to store if a treatment has constant concentration or not
+        self.concconst = np.zeros(self.ntreats) 
+        self.concmax = np.zeros(self.ntreats)
+        for i in range(self.ntreats):
+            self.concslopes[i,:-1] = np.diff(self.concarray[i])/np.diff(self.time)
+            self.conctwa[i] = np.trapz(self.concarray[i],self.time)/self.time[-1]
+            self.concmax[i] = np.max(self.concarray[i])
+            if (np.all(self.concslopes[i])==0) & (len(np.unique(self.concarray[i]))<2):
+                self.concconst[i] = 1
+
+
+class dataclass:
+    def __init__(self,survdata):
+        self.survdata = survdata
+        self.ntreats = survdata.shape[1] - 1
+        self.time = survdata[:,0]
+        self.deatharray = np.zeros((self.ntreats,len(self.time)))
+        self.lowlim = np.zeros((self.ntreats,len(self.time)))
+        self.upplim = np.zeros((self.ntreats,len(self.time)))
+        z= 1.96
+        for i in range(self.ntreats):
+            self.deatharray[i,:len(self.time)-1] = np.array(-np.diff(survdata[:,i+1]))
+            self.deatharray[i,-1] = survdata[-1,i+1]
+            ninit = survdata[0,i+1]
+            # Wilson score interval on data probabilities.
+            # https://en.wikipedia.org/wiki/Binomial_proportion_confidence_interval#Wilson_score_interval
+            survprop = survdata[:,i+1]/ninit
+            a = (survprop + z**2/(2*ninit))/(1+z**2/ninit)
+            b = z/(1+z**2/ninit) * np.sqrt(survprop*(1-survprop)/ninit + z**2/(4*ninit**2))
+            a[0]=1
+            b[0]=0
+            self.lowlim[i,:] = np.maximum(0,a-b)
+            self.upplim[i,:] = np.minimum(1,a+b)
+            
+
+class pyGUTSred:
+    def __init__(self,
+                 datafile,
+                 variant,
+                 hbfree = True,
+                 preset=True,parvalues=None,lbound=None,ubound=None,islog=None,isfree=None,
+                 profile=True,
+                 rough=False):
+        self.variant = variant
+        self.hbfree = hbfree
+        self.filepath = datafile
+        self._readfile()
+        self.concstruct = concclass(self.concset)
+        self.datastruct = dataclass(self.survset)
+        if self.concstruct.time[-1] < self.datastruct.time[-1]:
+            self.concstruct.time = np.append(self.concstruct.time, self.datastruct.time[-1])
+            self.concstruct.concarray = np.append(self.concstruct.concarray,
+                                                  np.transpose([self.concstruct.concarray[:,-1]+self.concstruct.concslopes[:,-1]*(self.datastruct.time[-1]-self.concstruct.time[-2])]),
+                                                  axis=1)
+        if variant == 'SD':
+            self.parnames = ["kd","bs","zs","hb"]
+        else:
+            self.parnames = ["kd","Fs","zs","hb"]
+        if preset:
+            self._preset_pars()
+        else:
+            # in this case the user needs to insert the values
+            self.parvalues = parvalues
+            self.lbound = lbound
+            self.ubound = ubound
+            self.islog = islog
+            self.isfree = isfree
+            if len(parvalues) != 4 or len(lbound) != 4 or len(ubound) != 4 or len(islog) != 4 or len(isfree) != 4:
+                raise ValueError("need to set all the various parameters")
+            
+        self.model = models.GUTSmodels(self.datastruct,self.concstruct,self.variant,
+                                       self.parnames,self.parvalues,self.islog,self.isfree,
+                                       self.lbound,self.ubound)
+        print("precompile the functions")
+        self.model.log_likelihood(self.parvalues,self.parvalues,self.isfree)
+        if self.hbfree == False:
+            print("fit hb to control data")
+            self.fit_hb()
+        print("setup the parameter space explorer")
+        self.parspacesetup = parspace.SettingParspace(rough=rough,profile=profile)
+        self.parspace = parspace.PyParspace(self.parspacesetup,self.model)
+        self.plot_data_model(fit=0)
+
+    def _readfile(self):
+        with open(self.filepath, 'r') as f:
+            lines = f.readlines()
+        startp =0
+        stopp =len(lines)
+        startc=len(lines)
+        self.concunits = ""
+        survivald = list()
+        concd = list()
+        for i in range(0,len(lines)):
+            if "Survival time" in lines[i]:
+                startp=i
+            if "Concentration unit" in lines[i]:
+                #self.concunits = re.sub(r"^\s+",'',lines[i].split(":",1)[1].replace('\n',''))
+                self.conctunits = lines[i].split(":",1)[1].replace('\n','').strip()
+                stopp = i
+            if "Concentration time" in lines[i]:
+                startc = i
+            if (i>startp and i<stopp):
+                survivald.append(lines[i].split())
+            if i>startc and i<len(lines):
+                concd.append(lines[i].split())
+        
+        survdata=pd.DataFrame(survivald)
+        concdata=pd.DataFrame(concd)
+        print("survival data:")
+        print(survdata)
+        print("exposure data:")
+        print(concdata)
+        
+        survdata=survdata.apply(pd.to_numeric)
+        concdata=concdata.apply(pd.to_numeric)
+        self.concset=np.array(concdata)
+        self.survset=np.array(survdata)    
+
+    def _preset_pars(self):
+        self.isfree = np.array([1,1,1,0])
+        self.islog = np.array([1,1,0,0])
+        self.lbound = np.zeros(4)
+        self.ubound = np.zeros(4)
+        if self.hbfree:
+            self.isfree[-1] = 1
+        self.lbound[-1] = 1e-6
+        self.ubound[-1] = 0.07
+
+        tmax = np.max(self.datastruct.time)
+        tmin = np.min(self.datastruct.time[self.datastruct.time>0])
+        cmax = np.max(self.concstruct.concmax)
+        cmin = np.max(self.concstruct.concarray[self.concstruct.concarray>0])
+
+        # limits for kd
+        self.lbound[0] = min([np.log(20)/(5*365),-np.log(1-0.05)/tmax])
+        self.ubound[0] = max([np.log(20)/(0.5/24) , -np.log(1-0.99)/(0.1*tmin)])
+        self.lbound[2] = cmin*(1-np.exp(-self.lbound[0]*(4./24.)))
+        if self.variant == 'SD':
+            # limits for bs
+            self.lbound[1] = -np.log(0.9)/(cmax*tmax)
+            self.ubound[1] = (24**2*0.95)/(self.lbound[0]*cmax*np.exp(-self.lbound[0]*tmax*0.5))
+             # upper limits for zs
+            self.ubound[2] = 0.99*cmax
+        else:
+            # limits for Fs
+            self.lbound[1] = 1.05
+            self.ubound[1] = 20
+             # upper limits for zs
+            self.ubound[2] = 2*cmax
+        
+        self.lbound = np.log10(self.lbound)*self.islog+self.lbound*(1-self.islog)
+        self.ubound = np.log10(self.ubound)*self.islog+self.ubound*(1-self.islog)    
+        self.parvalues = (self.lbound+self.ubound)/2
+        #self.parvalues = np.log10(self.parvalues)*self.islog+self.parvalues*(1-self.islog)
+        print("Parameter settings:")
+        print("parnames: ",self.parnames)
+        print("parameters lower bounds: ",self.lbound)
+        print("parameters upper bounds: ",self.ubound)
+        print("parameters are log-transformed: ",self.islog)
+        print("parameters are free: ",self.isfree)
+
+    def fit_hb(self):
+        res = sp.optimize.minimize(models.hb_fit_ll, 
+                                   x0=self.parvalues[-1], 
+                                   args=(self.datastruct.time,self.model.deathdata[0]),
+                                   method='Nelder-Mead',
+                                   bounds=[(self.lbound[-1], self.ubound[-1])])
+        self.parvalues[-1] = res.x
+        print("hb fitted to control data: %.4f"%(self.parvalues[-1]))
+
+    def run_parspace(self):
+        start = time.time()
+        self.parspace.run_parspace()
+        stop = time.time()
+        print("elapsed time for the parameter space exploration: %.4f"%(stop-start))
+
+    def plot_parspace(self):
+        self.parspace.plot_parspace()
+
+    def plot_data_model(self,fit=0, modellabel='model'):
+        '''
+        Function to plot data and/or model
+
+        Arguments:
+        ----------
+            fit = int
+                0 for data only, 1 for data and model, 2 for data, model,
+                and 95% confidence interval
+            modellabel : string
+                Customize model fit label (defualt "model")
+        '''
+        if fit in [0,1,2]:
+            fig=plt.figure()
+            ax = fig.subplots(2,self.datastruct.ntreats)
+            cmax = np.max(self.concstruct.concmax)
+            #nmax = np.max(self.datastruct.survdata[:,1:])
+            nmax = 1
+            for i in range(self.datastruct.ntreats):
+                ax[0,i].fill_between(self.concstruct.time,self.concstruct.concarray[i], label='Concentration', color='blue', alpha=0.2)
+                ax[0,i].set_ylim([0, cmax*1.1])
+                yvals = self.datastruct.survdata[:,i+1]/self.datastruct.survdata[0,i+1]
+                deltalow = np.maximum(yvals-self.datastruct.lowlim[i],0)
+                deltaup = np.maximum(self.datastruct.upplim[i]-yvals,0)
+                ax[1,i].errorbar(self.datastruct.time,yvals, 
+                                 yerr=[deltalow,deltaup], fmt='o',label='Survival')
+                ax[1,i].set_xlabel("Time [d]")
+                ax[1,i].set_ylim([0, nmax*1.1])
+            ax[0,0].set_ylabel("Concentration [%s]"%self.conctunits)
+            ax[1,0].set_ylabel("Survival")
+            plt.tight_layout()
+            if fit>0:
+                for i in range(self.datastruct.ntreats):
+                    nmax = 1#self.datastruct.survdata[0,i+1]
+                    modelpars = 10**self.parspace.fullset*self.islog + self.parspace.fullset*(1-self.islog)
+                    damage = self.model.calc_damage(modelpars[0], i, self.concstruct.concconst[i])
+                    survival = self.model.calc_survival(i, damage, modelpars, self.concstruct.concconst[i])
+                    ax[0,i].plot(self.model.timeext, damage, label=modellabel,color='k', linestyle='--')
+                    ax[1,i].plot(self.model.timeext, nmax*survival, label=modellabel)
+                if fit>1:
+                    for i in range(self.datastruct.ntreats):
+                        damlines = np.zeros((len(self.parspace.propagationset),len(self.model.timeext)))
+                        surlines = np.zeros((len(self.parspace.propagationset),len(self.model.timeext)))
+                        pars95 = np.copy(self.parspace.fullset)
+                        for j in range(len(self.parspace.propagationset)):
+                            pars95[self.parspace.posfree] = self.parspace.propagationset[j]
+                            pars95 = 10**pars95*self.islog + pars95*(1-self.islog)
+                            damlines[j,:] = self.model.calc_damage(pars95[0], i, self.concstruct.concconst[i])
+                            surlines[j,:] = self.model.calc_survival(i, damlines[j,:], pars95, self.concstruct.concconst[i])
+                        damlineup   = damlines.max(axis=0)
+                        damlinedown = damlines.min(axis=0)
+                        surlineup   = surlines.max(axis=0)
+                        surlinedown = surlines.min(axis=0)
+                        ax[0,i].fill_between(self.model.timeext,damlinedown,damlineup, color='gray', alpha=0.5, label='95% CI')
+                        ax[1,i].fill_between(self.model.timeext,surlinedown,surlineup, color='gray', alpha=0.5, label='95% CI')
+            plt.show()
+        else:
+            print("fit can be only 0 (data only), 1 (data and best fit), or 2 (data, best fit, and confidence interval)")
