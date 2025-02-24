@@ -88,7 +88,7 @@ class pyGUTSred:
                                        self.parnames,self.parvalues,self.islog,self.isfree,
                                        self.lbound,self.ubound)
         print("precompile the functions")
-        self.model.log_likelihood(self.parvalues,self.parvalues,self.isfree)
+        self.model.log_likelihood(self.parvalues,self.parvalues,self.model.posfree)
         if self.hbfree == False:
             print("fit hb to control data")
             self.fit_hb()

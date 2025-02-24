@@ -76,20 +76,19 @@ def guts_sdmodel(y,t,C,timextr,pars):
     
 @jit(nopython=1)
 def guts_itmodel(tvals, Dvals,pars):
-    # missing the background mortality here. TO BE fixed
-    beta,mw,hb=pars
-    maxDw = Dvals
-    diffs = Dvals[1:]-Dvals[:-1]
+    Fs,mw,hb=pars
+    beta = np.log(39)/np.log(Fs)
+    maxDw = np.copy(Dvals)
+    diffs = maxDw[1:]-maxDw[:-1]
     temparr =np.append(0,diffs)
     ind = np.argwhere(temparr<0)
     while ind.size>0:
         ind = ind[0][0]
-        test = np.append(maxDw[ind:],maxDw[ind-1])
-        maxDw[ind:] = max(test)
+        maxDw[ind:] = np.maximum(maxDw[ind:],maxDw[ind-1])
         newdiffs = maxDw[1:] - maxDw[:-1]
         temparr =np.append(0,newdiffs)
-        ind = np.argwhere(temparr<0)
-    Sc = 1 / (1+(maxDw/mw)**beta)
+        ind = np.argwhere(temparr<0)        
+    Sc = 1. / (1.+(maxDw/mw)**beta)
     Sc = Sc * np.exp(-hb*tvals)
     return(Sc)
 
@@ -104,8 +103,10 @@ def hb_fit_ll(hb, tvals, deathcontroldata):
 @jit(nopython=1)
 def loglikelihood(modelvector, commontime, deathvector):
     surviv_selected = modelvector[commontime]
+    #print(surviv_selected)
     pdeath = np.append(-np.diff(surviv_selected),surviv_selected[-1])
     pdeath = np.maximum(pdeath,1e-50)
+    #print(deathvector)
     llik=np.dot(deathvector,np.log(pdeath))
     return(-llik)
 

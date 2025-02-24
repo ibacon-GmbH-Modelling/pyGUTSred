@@ -378,7 +378,7 @@ class PyParspace:
                 flag_profile[0] = 1
                 flag_profile[1] = np.inf
                 # this should be checked carefully, see note in Tjalling's code
-            parprof = parprof[parprof[:,-1] < mll + chicrit_single+1,:] # keep impottant parts
+            parprof = parprof[parprof[:,-1] < mll + chicrit_single+1,:] # keep important parts
             for i_g in range(2,parprof.shape[0]-1):
                 gridsp = 0.5 * np.diff(parprof[[i_g-1,i_g,i_g+1], i_p], axis=0)
                 ind_tst_tmp1 = np.argwhere(coll_all[:,i_p] > (parprof[i_g,i_p]-gridsp[0])).flatten()
@@ -401,6 +401,9 @@ class PyParspace:
                     # sample is better then profile, so we will need a new profiling round
                     min_MLL = min(parprof[[i_g-1,i_g,i_g+1], -1])
                     if mll_compare < min_MLL:
+                        # DEBUG
+                        # print(flag_profile)
+                        # print("this should go here",mll_compare - min_MLL)
                         flag_profile[0] = flag_profile[0]+1
                         flag_profile[1] = max(flag_profile[1], mll_compare - min_MLL)
         coll_ok = np.reshape(coll_ok, (coll_ok.shape[0]//(self.npars+1), self.npars+1))
@@ -433,6 +436,8 @@ class PyParspace:
         edges = np.array([min(coll_all[:ind_final,index]), max(coll_all[:ind_final,index])])
         par_rng = np.linspace(edges[0],edges[1],gridsz)
         gridsp = 0.5 * (edges[1] - edges[0])/(gridsz-1) # why do I need this again when I have par_rng
+        bfitind = np.argwhere(par_rng <= coll_all[0,index]).flatten().max()
+        par_rng = par_rng + (coll_all[0,index] - par_rng[bfitind])
 
         for i_g in range(gridsz):
             ind_tst_tmp = np.argwhere(coll_all[:,index]>(par_rng[i_g]-gridsp)).flatten()
@@ -545,7 +550,7 @@ class PyParspace:
             if mll_tst < mll:
                 pbest = np.copy(parprof[0,:])
                 if ((mll_rem - mll_tst) > self.opts.real_better) & ((mll - mll_tst) > self.opts.real_better):
-                    print("Better optimum found when extending profile for ", self.model.parlabels[self.posfree[index]], " down: ", mll_tst, " (best was ", mll, ")")
+                    print("Better optimum found when extending profile for ", self.parlabels[self.posfree[index]], " down: ", mll_tst, " (best was ", mll, ")")
                 mll = mll_tst
 
         flag_disp = 0
@@ -571,7 +576,7 @@ class PyParspace:
             if mll_tst < mll:
                 pbest = np.copy(parprof[-1,:])
                 if ((mll_rem - mll_tst) > self.opts.real_better) & ((mll - mll_tst) > self.opts.real_better):
-                    print("Better optimum found when extending profile for ", self.model.parlabels[self.posfree[index]], " up: ", mll_tst, " (best was ", mll, ")")
+                    print("Better optimum found when extending profile for ", self.parlabels[self.posfree[index]], " up: ", mll_tst, " (best was ", mll, ")")
                 mll = mll_tst
 
         if self.npars == 1:
@@ -996,6 +1001,7 @@ class PyParspace:
                     ind_single = np.argwhere(self.coll_all[:,-1] < self.coll_all[0,-1]+chicrit_single).flatten().max()
                     # test if the profile is very far from the sample
                     flag_profile=self._test_profile(self.coll_all, parprofile, self.opts)
+                    print(flag_profile) # DEBUG
                     if ind_single < n_conf[1]:
                         ind_cont = np.argwhere(coll_tries[:,-1] < mll+self.opts.crit_add_extra).flatten().max()
                         if ind_cont < 0.5 * n_conf[1]:
