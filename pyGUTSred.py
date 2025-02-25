@@ -30,7 +30,9 @@ class dataclass:
         self.survdata = survdata
         self.ntreats = survdata.shape[1] - 1
         self.time = survdata[:,0]
+        self.survarray = np.transpose(survdata[:,1:])
         self.deatharray = np.zeros((self.ntreats,len(self.time)))
+        self.survprobs = np.zeros((self.ntreats,len(self.time)))
         self.lowlim = np.zeros((self.ntreats,len(self.time)))
         self.upplim = np.zeros((self.ntreats,len(self.time)))
         z= 1.96
@@ -41,6 +43,7 @@ class dataclass:
             # Wilson score interval on data probabilities.
             # https://en.wikipedia.org/wiki/Binomial_proportion_confidence_interval#Wilson_score_interval
             survprop = survdata[:,i+1]/ninit
+            self.survprobs[i,:] = survprop
             a = (survprop + z**2/(2*ninit))/(1+z**2/ninit)
             b = z/(1+z**2/ninit) * np.sqrt(survprop*(1-survprop)/ninit + z**2/(4*ninit**2))
             a[0]=1
@@ -188,7 +191,7 @@ class pyGUTSred:
         start = time.time()
         self.parspace.run_parspace()
         stop = time.time()
-        print("elapsed time for the parameter space exploration: %.4f"%(stop-start))
+        print("Elapsed time for the parameter space exploration: %.4f"%(stop-start))
 
     def plot_parspace(self):
         self.parspace.plot_parspace()
@@ -251,3 +254,50 @@ class pyGUTSred:
             plt.show()
         else:
             print("fit can be only 0 (data only), 1 (data and best fit), or 2 (data, best fit, and confidence interval)")
+
+    def EFSA_quality_criteria(self):
+        ssq_fit = 0
+        ssq_fit0 = 0
+        ssq_fitnum = 0
+        ssq_fitnum0 = 0
+        ssq_tot = 0
+        ssq_tot0 = 0
+        sppe = np.zeros(self.concstruct.ntreats)
+        modelpars = 10**self.parspace.fullset*self.islog + self.parspace.fullset*(1-self.islog)
+        for i in range(self.concstruct.ntreats):
+            nmax = self.datastruct.survarray[i,0]
+            damage = self.model.calc_damage(modelpars[0], i, self.concstruct.concconst[i])
+            survival = self.model.calc_survival(i, damage, modelpars, self.concstruct.concconst[i])
+            ssq_fitnum += np.sum((self.datastruct.survarray[i,1:]-nmax*survival[self.model.index_commontime[1:]])**2) 
+            ssq_fitnum0 += np.sum((self.datastruct.survarray[i]-nmax*survival[self.model.index_commontime])**2) 
+            ssq_fit += np.sum((self.datastruct.survprobs[i,1:]-survival[self.model.index_commontime[1:]])**2)
+            ssq_fit0 += np.sum((self.datastruct.survprobs[i]-survival[self.model.index_commontime])**2)
+            sppe[i] = 100 * (self.datastruct.survprobs[i,-1] - survival[self.model.index_commontime[-1]])
+        ssq_tot = np.sum((self.datastruct.survprobs.flatten()-np.mean(self.datastruct.survprobs.flatten()))**2)
+        ssq_tot0 = np.sum((self.datastruct.survprobs[:,1:].flatten()-np.mean(self.datastruct.survprobs[:,1:].flatten()))**2)
+        nrmse   = 100 * np.sqrt(ssq_fitnum/(self.concstruct.ntreats*len(self.datastruct.survprobs[0,1:]))) / np.mean(self.datastruct.survarray[:,1:].flatten())
+        nrmse0   = 100 * np.sqrt(ssq_fitnum0/(self.concstruct.ntreats*len(self.datastruct.survprobs[0]))) / np.mean(self.datastruct.survarray.flatten())
+        print("----------------------------------------------")
+        print("R2: %.4f"%(1-ssq_fit/ssq_tot))
+        print("NRMSE: %.4f"%nrmse)
+        print("----------------------------------------------")
+        print("R2 with t=0 point: %.4f"%(1-ssq_fit0/ssq_tot0))
+        print("NRMSE with t=0 point: %.4f"%nrmse0)
+        print("----------------------------------------------")
+        print("Survival probability prediction error (SPPE)")
+        print("{:<12} {:<10}".format("Treatment", "value"))
+        for i in range(self.concstruct.ntreats):
+            print("{:<12.0f} {:#.3g} %".format(i, sppe[i]))
+        print("----------------------------------------------")
+
+    def predicted_vs_observed(self):
+        pass
+
+    def lcx_calculation(self):
+        pass
+
+    def validate(self):
+        pass
+
+    def lpx_calculation(self):
+        pass

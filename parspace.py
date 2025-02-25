@@ -436,6 +436,7 @@ class PyParspace:
         edges = np.array([min(coll_all[:ind_final,index]), max(coll_all[:ind_final,index])])
         par_rng = np.linspace(edges[0],edges[1],gridsz)
         gridsp = 0.5 * (edges[1] - edges[0])/(gridsz-1) # why do I need this again when I have par_rng
+        # include the best fit position in the grid
         bfitind = np.argwhere(par_rng <= coll_all[0,index]).flatten().max()
         par_rng = par_rng + (coll_all[0,index] - par_rng[bfitind])
 
@@ -629,7 +630,8 @@ class PyParspace:
                     num_x = num_x + np.sum(res_parspace[i,3:5]==1)
                     if num_x > 2:
                         res_parspace[i,5] = 1 # means we have broken CI
-            
+            print("Best fit likelihood: %.2f"%mll)
+            print("Best fit AIC: %.2f"%(2*mll+2*self.npars))
             print("Parameter values:")
             print("{:<15} {:<10} {:<15} {:<15} {:<11} {:<11} {:<11}".format("Parameter",
                                                                             "Best", "Lower 95%", "Upper 95%",
@@ -650,6 +652,8 @@ class PyParspace:
             res_parspace[:,2] = 10**(coll_all[ind_prop1:ind_prop2,:-1].max(axis=0))*self.model.islog + (coll_all[ind_prop1:ind_prop2,:-1].max(axis=0))*(1-self.model.islog)
             print("The results here are obtained from the paramter space explorer without profiling option.")
             print("Best fit values and CI estimates could be considered as estimates")
+            print("Best fit likelihood: %.2f"%mll)
+            print("Best fit AIC: %.2f"%(2*mll+2*self.npars))
             print("Parameter values:")
             print("{:<15} {:<10} {:<15} {:<15}".format("Parameter", "Best", "Lower 95%", "Upper 95%"))
             for i in range(self.npars):
@@ -1001,7 +1005,7 @@ class PyParspace:
                     ind_single = np.argwhere(self.coll_all[:,-1] < self.coll_all[0,-1]+chicrit_single).flatten().max()
                     # test if the profile is very far from the sample
                     flag_profile=self._test_profile(self.coll_all, parprofile, self.opts)
-                    print(flag_profile) # DEBUG
+                    #print(flag_profile) # DEBUG
                     if ind_single < n_conf[1]:
                         ind_cont = np.argwhere(coll_tries[:,-1] < mll+self.opts.crit_add_extra).flatten().max()
                         if ind_cont < 0.5 * n_conf[1]:
@@ -1072,61 +1076,6 @@ class PyParspace:
             self._print_results(self.profile)
         else:
             self._print_results()
-
-    def plot_data(self,fit=0, xlabel='conc. [a.u.]',ylabel='mortality', modellabel='model',breakaxis=False,breakval=None):
-        '''
-        Function to plot data and/or model
-
-        Arguments:
-        ----------
-            fit = int
-                0 for data only, 1 for data and model, 2 for data, model,
-                and 95% confidence interval
-            xlabel : string
-                Customize xlabel value (default "conc. [a.u.]")
-            ylabel : string
-                Customize ylabel value (default "conc. [a.u.]")
-            modellabel : string
-                Customize model fit label (defualt "model")
-            breakaxis : bool
-                Introduce a logarithmic part of the x axis (default False)
-            breakval : float
-                Start of the logarithmic part in the x axis. If breakaxis == True and 
-                a breakval is not provided, the function default to half of the first
-                non-zero value in the vector of x values
-        '''
-        if fit in [0,1,2]:
-            maxdoseconc = max(self.model.xvals)
-            fig=plt.figure()
-            ax = fig.add_subplot(111)
-            ax.plot(self.model.xvals,
-                    self.model.yvals,
-                    'o', label='Data')
-            ax.set_xlabel(xlabel)
-            ax.set_ylabel(ylabel)
-            if fit > 0:
-                xlim=np.linspace(1,maxdoseconc*1.2,500)
-                bfit = np.copy(10**self.fullset*self.model.islog + self.fullset*(1-self.model.islog))
-                ax.plot(xlim,self.model.modelfunc(xlim,bfit),
-                        'k-',label = modellabel)
-                if fit > 1:
-                    lines = np.zeros((len(self.propagationset),len(xlim)))
-                    pars95 = np.copy(self.fullset)
-                    for i in range(len(self.propagationset)):
-                        pars95[self.posfree] = self.propagationset[i]
-                        lines[i,:] = self.model.modelfunc(xlim,10**pars95*self.model.islog + pars95*(1-self.model.islog))
-                    lineup=lines.max(axis=0)
-                    linedown=lines.min(axis=0)
-                    ax.fill_between(xlim,linedown,lineup, color='gray', alpha=0.5, label='95% CI')
-                ax.set_ylim([-0.05, 1.1])
-            ax.set_xlim([-1,maxdoseconc*1.3])
-            ax.legend(loc='upper left')
-            if breakaxis:
-                if breakval == None:
-                    breakval = self.model.xvals[1]/2
-                ax.set_xscale('symlog', linthresh=breakval)
-        else:
-            print("fit can be only 0 (data only), 1 (data and best fit), or 2 (data, best fit, and confidence interval)")
 
     def save_sample(self,filename):
         """
