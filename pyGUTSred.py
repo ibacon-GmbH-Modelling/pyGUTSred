@@ -51,8 +51,8 @@ class dataclass:
             self.lowlim[i,:] = np.maximum(0,a-b)
             self.upplim[i,:] = np.minimum(1,a+b)
             
-
-class pyGUTSred:
+# this class inherits from PyParspace and extends the functionalities
+class pyGUTSred(parspace.PyParspace):
     def __init__(self,
                  datafile,
                  variant,
@@ -63,9 +63,9 @@ class pyGUTSred:
         self.variant = variant
         self.hbfree = hbfree
         self.filepath = datafile
+        self.concstruct = 0
+        self.datastruct = 0
         self._readfile()
-        self.concstruct = concclass(self.concset)
-        self.datastruct = dataclass(self.survset)
         if self.concstruct.time[-1] < self.datastruct.time[-1]:
             self.concstruct.time = np.append(self.concstruct.time, self.datastruct.time[-1])
             self.concstruct.concarray = np.append(self.concstruct.concarray,
@@ -97,7 +97,8 @@ class pyGUTSred:
             self.fit_hb()
         print("setup the parameter space explorer")
         self.parspacesetup = parspace.SettingParspace(rough=rough,profile=profile)
-        self.parspace = parspace.PyParspace(self.parspacesetup,self.model)
+        #self.parspace = parspace.PyParspace(self.parspacesetup,self.model)
+        super().__init__(self.parspacesetup,self.model)
         self.plot_data_model(fit=0)
 
     def _readfile(self):
@@ -132,8 +133,8 @@ class pyGUTSred:
         
         survdata=survdata.apply(pd.to_numeric)
         concdata=concdata.apply(pd.to_numeric)
-        self.concset=np.array(concdata)
-        self.survset=np.array(survdata)    
+        self.concstruct=concclass(np.array(concdata))
+        self.datastruct=dataclass(np.array(survdata))
 
     def _preset_pars(self):
         self.isfree = np.array([1,1,1,0])
@@ -187,16 +188,13 @@ class pyGUTSred:
         self.parvalues[-1] = res.x
         print("hb fitted to control data: %.4f"%(self.parvalues[-1]))
 
-    def run_parspace(self):
+    def run_and_time_parspace(self):
         start = time.time()
-        self.parspace.run_parspace()
+        self.run_parspace()
         stop = time.time()
         print("Elapsed time for the parameter space exploration: %.4f"%(stop-start))
 
-    def plot_parspace(self):
-        self.parspace.plot_parspace()
-
-    def plot_data_model(self,fit=0, modellabel='model'):
+    def plot_data_model(self,fit=0, modellabel='model', add_obspred=True):
         '''
         Function to plot data and/or model
 
@@ -228,20 +226,40 @@ class pyGUTSred:
             ax[1,0].set_ylabel("Survival")
             plt.tight_layout()
             if fit>0:
+                modelpars = 10**self.fullset*self.islog + self.fullset*(1-self.islog)
+                if add_obspred:
+                    fig2 = plt.figure()
+                    ax2 = fig2.subplots(1,2)
+                    survmodelprob = np.zeros_like(self.datastruct.survprobs)
+                    ax2[0].plot([0,1],[0,1], 'k--',lw=0.5,label='')
+                    ax2[1].plot([0,1],[0,1], 'k--',lw=0.5,label='')
+                    ax2[0].set_xlabel("Observerd survival probability")
+                    ax2[0].set_ylabel("Predicted survival probability")
+                    ax2[1].set_xlabel("Observed deaths per interval")
+                    ax2[1].set_ylabel("Predicted deaths per interval")
                 for i in range(self.datastruct.ntreats):
                     nmax = 1#self.datastruct.survdata[0,i+1]
-                    modelpars = 10**self.parspace.fullset*self.islog + self.parspace.fullset*(1-self.islog)
                     damage = self.model.calc_damage(modelpars[0], i, self.concstruct.concconst[i])
                     survival = self.model.calc_survival(i, damage, modelpars, self.concstruct.concconst[i])
+                    survmodelprob[i] = survival[self.model.index_commontime]
                     ax[0,i].plot(self.model.timeext, damage, label=modellabel,color='k', linestyle='--')
                     ax[1,i].plot(self.model.timeext, nmax*survival, label=modellabel)
+                    # here needs to be modified with actual names of the treatments
+                    ax2[0].plot(self.datastruct.survprobs[i],survmodelprob[i], 'o', label = "Treatment %i"%(i)) 
+                    ax2[1].plot(self.datastruct.deatharray[i],
+                                self.datastruct.survarray[i,0]*np.append(-np.diff(survmodelprob[i]),
+                                                                [survmodelprob[i,-1]]),
+                                'o',label = '')
+                maxdeaths = max(ax2[1].get_xlim()[1],ax2[1].get_ylim()[1])
+                ax2[1].plot([0,maxdeaths],[0,maxdeaths], 'k--',lw=0.5,label='')
+                ax2[0].legend(loc='lower right')
                 if fit>1:
                     for i in range(self.datastruct.ntreats):
-                        damlines = np.zeros((len(self.parspace.propagationset),len(self.model.timeext)))
-                        surlines = np.zeros((len(self.parspace.propagationset),len(self.model.timeext)))
-                        pars95 = np.copy(self.parspace.fullset)
-                        for j in range(len(self.parspace.propagationset)):
-                            pars95[self.parspace.posfree] = self.parspace.propagationset[j]
+                        damlines = np.zeros((len(self.propagationset),len(self.model.timeext)))
+                        surlines = np.zeros((len(self.propagationset),len(self.model.timeext)))
+                        pars95 = np.copy(self.fullset)
+                        for j in range(len(self.propagationset)):
+                            pars95[self.posfree] = self.propagationset[j]
                             pars95 = 10**pars95*self.islog + pars95*(1-self.islog)
                             damlines[j,:] = self.model.calc_damage(pars95[0], i, self.concstruct.concconst[i])
                             surlines[j,:] = self.model.calc_survival(i, damlines[j,:], pars95, self.concstruct.concconst[i])
@@ -251,6 +269,13 @@ class pyGUTSred:
                         surlinedown = surlines.min(axis=0)
                         ax[0,i].fill_between(self.model.timeext,damlinedown,damlineup, color='gray', alpha=0.5, label='95% CI')
                         ax[1,i].fill_between(self.model.timeext,surlinedown,surlineup, color='gray', alpha=0.5, label='95% CI')
+                        ax2[0].errorbar(self.datastruct.survprobs[i],
+                                        survmodelprob[i],
+                                        yerr=[survmodelprob[i]-surlinedown[self.model.index_commontime],
+                                              surlineup[self.model.index_commontime]-survmodelprob[i]], fmt='none',
+                                              ecolor='k', zorder = 0)
+                fig2.tight_layout()
+            fig.tight_layout()
             plt.show()
         else:
             print("fit can be only 0 (data only), 1 (data and best fit), or 2 (data, best fit, and confidence interval)")
@@ -263,7 +288,7 @@ class pyGUTSred:
         ssq_tot = 0
         ssq_tot0 = 0
         sppe = np.zeros(self.concstruct.ntreats)
-        modelpars = 10**self.parspace.fullset*self.islog + self.parspace.fullset*(1-self.islog)
+        modelpars = 10**self.fullset*self.islog + self.fullset*(1-self.islog)
         for i in range(self.concstruct.ntreats):
             nmax = self.datastruct.survarray[i,0]
             damage = self.model.calc_damage(modelpars[0], i, self.concstruct.concconst[i])
@@ -290,8 +315,6 @@ class pyGUTSred:
             print("{:<12.0f} {:#.3g} %".format(i, sppe[i]))
         print("----------------------------------------------")
 
-    def predicted_vs_observed(self):
-        pass
 
     def lcx_calculation(self):
         pass
