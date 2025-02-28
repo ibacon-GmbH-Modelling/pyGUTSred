@@ -316,8 +316,79 @@ class pyGUTSred(parspace.PyParspace):
         print("----------------------------------------------")
 
 
-    def lcx_calculation(self):
-        pass
+    def lcx_calculation(self, timepoints=[2,4,10,21], levels=[0.1,0.2,0.5], pars = None, plot=False):
+        # the calculation of LCx values assumes always that the 
+        # exposure is constant
+        if pars == None:
+            modelpars = 10**self.fullset*self.islog + self.fullset*(1-self.islog)
+            modelpars[-1] = 0 # for the LCx values, bkg mortality is 0
+        else:
+            modelpars = pars
+        LCx = np.zeros((len(timepoints),len(levels)))
+        LCxlo = np.zeros((len(timepoints),len(levels)))
+        LCxup = np.zeros((len(timepoints),len(levels)))
+        par95 = 10**self.propagationset*self.islog + self.propagationset*(1-self.islog)
+        par95[:,-1] = 0 # remove the background mortality
+        for i in range(len(timepoints)):
+            timevectors = np.linspace(0,timepoints[i],self.model.nbinsperday)
+            for j in range(len(levels)):
+                lcxmin = np.inf
+                lcxmax = 0
+                if self.variant == 'IT':
+                    LCx[i,j]=(modelpars[2]/(1-np.exp(-modelpars[0]*timevectors[-1]))) * (levels[j]/(1-levels[j]))**(1/modelpars[1])
+                    for k in par95:
+                        lcx = (k[2]/(1-np.exp(-k[0]*timevectors[-1]))) * (levels[j]/(1-levels[j]))**(1/k[1])
+                        if lcx <= lcxmin:
+                            lcxmin = lcx
+                        if lcx >= lcxmax:
+                            lcxmax = lcx
+                    LCxlo[i,j] = lcxmin
+                    LCxup[i,j] = lcxmax
+                else:
+                    conclims = np.array([modelpars[2]/10, modelpars[2]])
+                    crit = 1
+                    while crit>0:
+                        conclims = conclims * 10 # shift lower and upper range by factor of 10
+                        crit   = self.survfrac(conclims[1],timevectors,modelpars,levels[j]) - (1-levels[j]) # calculate criterion from upper range     
+                    LCx[i,j] = sp.optimize.brenth(self.survfrac,conclims[0],conclims[1],args=(timevectors,modelpars,levels[j]))
+                    for k in par95:
+                        conclims = np.array([k[2]/10, k[2]])
+                        crit = 1
+                        while crit>0:
+                            conclims = conclims * 10
+                            crit   = self.survfrac(conclims[1],timevectors,k,levels[j]) - (1-levels[j]) # calculate criterion from upper range
+                        lcx = sp.optimize.brenth(self.survfrac,conclims[0],conclims[1],args=(timevectors,k,levels[j]))
+                        if lcx <= lcxmin:
+                            lcxmin = lcx
+                        if lcx >= lcxmax:
+                            lcxmax = lcx
+                    LCxlo[i,j] = lcxmin
+                    LCxup[i,j] = lcxmax
+        if plot:
+            plt.figure()
+            for i in range(len(levels)):
+                plt.plot(timepoints, LCx[:,i],'o-', label='LD%d'%(round(levels[i]*100)))
+                plt.fill_between(timepoints,LCxlo[:,i],LCxup[:,i],alpha = 0.2, zorder=0)
+            plt.xlabel("Time [d]", fontsize=12)
+            plt.ylabel("Concentration "+self.conctunits, fontsize=12)
+            plt.legend(fontsize=12)
+            plt.tight_layout()
+            plt.show()
+        # printing the results
+        print("----------------------------------------------------------------")
+        print("LCx values:")
+        titlestring = "{:<10}".format("Time [d]")
+        for i in range(len(levels)):
+            titlestring = titlestring + "LD{:<32}".format(round(levels[i]*100))
+        print(titlestring)
+        for i in range(len(timepoints)):
+            values = "{:<10d}".format(timepoints[i])
+            for j in range(len(levels)):
+                values = values + "{:<7.3g} ({:<7.3g} - {:<7.3g})       ".format(LCx[i,j], LCxlo[i,j], LCxup[i,j])
+            print(values)
+
+    def survfrac(self,conc,timevector,modelpars, level):
+        return(self.model.calc_surv_sd_const(timevector,conc,modelpars)[-1] - (1-level))
 
     def validate(self):
         pass
