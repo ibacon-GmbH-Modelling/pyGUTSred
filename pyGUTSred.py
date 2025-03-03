@@ -62,10 +62,9 @@ class pyGUTSred(parspace.PyParspace):
                  rough=False):
         self.variant = variant
         self.hbfree = hbfree
-        self.filepath = datafile
-        self.concstruct = 0
-        self.datastruct = 0
-        self._readfile()
+        self.calibpath = datafile
+        # self.ndatasets = len(datafile)
+        self.concstruct, self.datastruct = self._readfile(datafile)
         if self.concstruct.time[-1] < self.datastruct.time[-1]:
             self.concstruct.time = np.append(self.concstruct.time, self.datastruct.time[-1])
             self.concstruct.concarray = np.append(self.concstruct.concarray,
@@ -101,8 +100,8 @@ class pyGUTSred(parspace.PyParspace):
         super().__init__(self.parspacesetup,self.model)
         self.plot_data_model(fit=0)
 
-    def _readfile(self):
-        with open(self.filepath, 'r') as f:
+    def _readfile(self,filepath):
+        with open(filepath, 'r') as f:
             lines = f.readlines()
         startp =0
         stopp =len(lines)
@@ -135,6 +134,7 @@ class pyGUTSred(parspace.PyParspace):
         concdata=concdata.apply(pd.to_numeric)
         self.concstruct=concclass(np.array(concdata))
         self.datastruct=dataclass(np.array(survdata))
+        return((concclass(np.array(concdata)), dataclass(np.array(survdata))))
 
     def _preset_pars(self):
         self.isfree = np.array([1,1,1,0])
@@ -194,7 +194,7 @@ class pyGUTSred(parspace.PyParspace):
         stop = time.time()
         print("Elapsed time for the parameter space exploration: %.4f"%(stop-start))
 
-    def plot_data_model(self,fit=0, modellabel='model', add_obspred=True):
+    def plot_data_model(self, fit=0, dataset=None, concset=None, modellabel='model', add_obspred=True):
         '''
         Function to plot data and/or model
 
@@ -206,19 +206,22 @@ class pyGUTSred(parspace.PyParspace):
             modellabel : string
                 Customize model fit label (defualt "model")
         '''
+        if ((dataset == None) | (concset == None)):
+            dataset = self.datastruct
+            concset = self.concstruct
         if fit in [0,1,2]:
             fig=plt.figure()
-            ax = fig.subplots(2,self.datastruct.ntreats)
-            cmax = np.max(self.concstruct.concmax)
-            #nmax = np.max(self.datastruct.survdata[:,1:])
+            ax = fig.subplots(2,dataset.ntreats)
+            cmax = np.max(concset.concmax)
+            #nmax = np.max(dataset.survdata[:,1:])
             nmax = 1
-            for i in range(self.datastruct.ntreats):
-                ax[0,i].fill_between(self.concstruct.time,self.concstruct.concarray[i], label='Concentration', color='blue', alpha=0.2)
+            for i in range(dataset.ntreats):
+                ax[0,i].fill_between(concset.time,concset.concarray[i], label='Concentration', color='blue', alpha=0.2)
                 ax[0,i].set_ylim([0, cmax*1.1])
-                yvals = self.datastruct.survdata[:,i+1]/self.datastruct.survdata[0,i+1]
-                deltalow = np.maximum(yvals-self.datastruct.lowlim[i],0)
-                deltaup = np.maximum(self.datastruct.upplim[i]-yvals,0)
-                ax[1,i].errorbar(self.datastruct.time,yvals, 
+                yvals = dataset.survdata[:,i+1]/dataset.survdata[0,i+1]
+                deltalow = np.maximum(yvals-dataset.lowlim[i],0)
+                deltaup = np.maximum(dataset.upplim[i]-yvals,0)
+                ax[1,i].errorbar(dataset.time,yvals, 
                                  yerr=[deltalow,deltaup], fmt='o',label='Survival')
                 ax[1,i].set_xlabel("Time [d]")
                 ax[1,i].set_ylim([0, nmax*1.1])
@@ -230,46 +233,46 @@ class pyGUTSred(parspace.PyParspace):
                 if add_obspred:
                     fig2 = plt.figure()
                     ax2 = fig2.subplots(1,2)
-                    survmodelprob = np.zeros_like(self.datastruct.survprobs)
+                    survmodelprob = np.zeros_like(dataset.survprobs)
                     ax2[0].plot([0,1],[0,1], 'k--',lw=0.5,label='')
                     ax2[1].plot([0,1],[0,1], 'k--',lw=0.5,label='')
                     ax2[0].set_xlabel("Observerd survival probability")
                     ax2[0].set_ylabel("Predicted survival probability")
                     ax2[1].set_xlabel("Observed deaths per interval")
                     ax2[1].set_ylabel("Predicted deaths per interval")
-                for i in range(self.datastruct.ntreats):
-                    nmax = 1#self.datastruct.survdata[0,i+1]
-                    damage = self.model.calc_damage(modelpars[0], i, self.concstruct.concconst[i])
-                    survival = self.model.calc_survival(i, damage, modelpars, self.concstruct.concconst[i])
+                for i in range(dataset.ntreats):
+                    nmax = 1#dataset.survdata[0,i+1]
+                    damage = self.model.calc_damage(modelpars[0], i, concset.concconst[i])
+                    survival = self.model.calc_survival(i, damage, modelpars, concset.concconst[i])
                     survmodelprob[i] = survival[self.model.index_commontime]
                     ax[0,i].plot(self.model.timeext, damage, label=modellabel,color='k', linestyle='--')
                     ax[1,i].plot(self.model.timeext, nmax*survival, label=modellabel)
                     # here needs to be modified with actual names of the treatments
-                    ax2[0].plot(self.datastruct.survprobs[i],survmodelprob[i], 'o', label = "Treatment %i"%(i)) 
-                    ax2[1].plot(self.datastruct.deatharray[i],
-                                self.datastruct.survarray[i,0]*np.append(-np.diff(survmodelprob[i]),
+                    ax2[0].plot(dataset.survprobs[i],survmodelprob[i], 'o', label = "Treatment %i"%(i)) 
+                    ax2[1].plot(dataset.deatharray[i],
+                                dataset.survarray[i,0]*np.append(-np.diff(survmodelprob[i]),
                                                                 [survmodelprob[i,-1]]),
                                 'o',label = '')
                 maxdeaths = max(ax2[1].get_xlim()[1],ax2[1].get_ylim()[1])
                 ax2[1].plot([0,maxdeaths],[0,maxdeaths], 'k--',lw=0.5,label='')
                 ax2[0].legend(loc='lower right')
                 if fit>1:
-                    for i in range(self.datastruct.ntreats):
+                    for i in range(dataset.ntreats):
                         damlines = np.zeros((len(self.propagationset),len(self.model.timeext)))
                         surlines = np.zeros((len(self.propagationset),len(self.model.timeext)))
                         pars95 = np.copy(self.fullset)
                         for j in range(len(self.propagationset)):
                             pars95[self.posfree] = self.propagationset[j]
                             pars95 = 10**pars95*self.islog + pars95*(1-self.islog)
-                            damlines[j,:] = self.model.calc_damage(pars95[0], i, self.concstruct.concconst[i])
-                            surlines[j,:] = self.model.calc_survival(i, damlines[j,:], pars95, self.concstruct.concconst[i])
+                            damlines[j,:] = self.model.calc_damage(pars95[0], i, concset.concconst[i])
+                            surlines[j,:] = self.model.calc_survival(i, damlines[j,:], pars95, concset.concconst[i])
                         damlineup   = damlines.max(axis=0)
                         damlinedown = damlines.min(axis=0)
                         surlineup   = surlines.max(axis=0)
                         surlinedown = surlines.min(axis=0)
                         ax[0,i].fill_between(self.model.timeext,damlinedown,damlineup, color='gray', alpha=0.5, label='95% CI')
                         ax[1,i].fill_between(self.model.timeext,surlinedown,surlineup, color='gray', alpha=0.5, label='95% CI')
-                        ax2[0].errorbar(self.datastruct.survprobs[i],
+                        ax2[0].errorbar(dataset.survprobs[i],
                                         survmodelprob[i],
                                         yerr=[survmodelprob[i]-surlinedown[self.model.index_commontime],
                                               surlineup[self.model.index_commontime]-survmodelprob[i]], fmt='none',
@@ -280,38 +283,41 @@ class pyGUTSred(parspace.PyParspace):
         else:
             print("fit can be only 0 (data only), 1 (data and best fit), or 2 (data, best fit, and confidence interval)")
 
-    def EFSA_quality_criteria(self):
+    def EFSA_quality_criteria(self, dataset = None, concset = None):
+        if ((dataset == None) | (concset == None)):
+            dataset = self.datastruct
+            concset = self.concstruct
         ssq_fit = 0
         ssq_fit0 = 0
         ssq_fitnum = 0
         ssq_fitnum0 = 0
         ssq_tot = 0
         ssq_tot0 = 0
-        sppe = np.zeros(self.concstruct.ntreats)
+        sppe = np.zeros(concset.ntreats)
         modelpars = 10**self.fullset*self.islog + self.fullset*(1-self.islog)
-        for i in range(self.concstruct.ntreats):
-            nmax = self.datastruct.survarray[i,0]
-            damage = self.model.calc_damage(modelpars[0], i, self.concstruct.concconst[i])
-            survival = self.model.calc_survival(i, damage, modelpars, self.concstruct.concconst[i])
-            ssq_fitnum += np.sum((self.datastruct.survarray[i,1:]-nmax*survival[self.model.index_commontime[1:]])**2) 
-            ssq_fitnum0 += np.sum((self.datastruct.survarray[i]-nmax*survival[self.model.index_commontime])**2) 
-            ssq_fit += np.sum((self.datastruct.survprobs[i,1:]-survival[self.model.index_commontime[1:]])**2)
-            ssq_fit0 += np.sum((self.datastruct.survprobs[i]-survival[self.model.index_commontime])**2)
-            sppe[i] = 100 * (self.datastruct.survprobs[i,-1] - survival[self.model.index_commontime[-1]])
-        ssq_tot = np.sum((self.datastruct.survprobs.flatten()-np.mean(self.datastruct.survprobs.flatten()))**2)
-        ssq_tot0 = np.sum((self.datastruct.survprobs[:,1:].flatten()-np.mean(self.datastruct.survprobs[:,1:].flatten()))**2)
-        nrmse   = 100 * np.sqrt(ssq_fitnum/(self.concstruct.ntreats*len(self.datastruct.survprobs[0,1:]))) / np.mean(self.datastruct.survarray[:,1:].flatten())
-        nrmse0   = 100 * np.sqrt(ssq_fitnum0/(self.concstruct.ntreats*len(self.datastruct.survprobs[0]))) / np.mean(self.datastruct.survarray.flatten())
+        for i in range(concset.ntreats):
+            nmax = dataset.survarray[i,0]
+            damage = self.model.calc_damage(modelpars[0], i, concset.concconst[i])
+            survival = self.model.calc_survival(i, damage, modelpars, concset.concconst[i])
+            ssq_fitnum += np.sum((dataset.survarray[i,1:]-nmax*survival[self.model.index_commontime[1:]])**2) 
+            ssq_fitnum0 += np.sum((dataset.survarray[i]-nmax*survival[self.model.index_commontime])**2) 
+            ssq_fit += np.sum((dataset.survprobs[i,1:]-survival[self.model.index_commontime[1:]])**2)
+            ssq_fit0 += np.sum((dataset.survprobs[i]-survival[self.model.index_commontime])**2)
+            sppe[i] = 100 * (dataset.survprobs[i,-1] - survival[self.model.index_commontime[-1]])
+        ssq_tot = np.sum((dataset.survprobs.flatten()-np.mean(dataset.survprobs.flatten()))**2)
+        ssq_tot0 = np.sum((dataset.survprobs[:,1:].flatten()-np.mean(dataset.survprobs[:,1:].flatten()))**2)
+        nrmse   = 100 * np.sqrt(ssq_fitnum/(concset.ntreats*len(dataset.survprobs[0,1:]))) / np.mean(dataset.survarray[:,1:].flatten())
+        nrmse0   = 100 * np.sqrt(ssq_fitnum0/(concset.ntreats*len(dataset.survprobs[0]))) / np.mean(dataset.survarray.flatten())
         print("----------------------------------------------")
         print("R2: %.4f"%(1-ssq_fit/ssq_tot))
-        print("NRMSE: %.4f"%nrmse)
+        print("NRMSE(%): %.4f"%nrmse)
         print("----------------------------------------------")
         print("R2 with t=0 point: %.4f"%(1-ssq_fit0/ssq_tot0))
-        print("NRMSE with t=0 point: %.4f"%nrmse0)
+        print("NRMSE(%) with t=0 point: %.4f"%nrmse0)
         print("----------------------------------------------")
         print("Survival probability prediction error (SPPE)")
         print("{:<12} {:<10}".format("Treatment", "value"))
-        for i in range(self.concstruct.ntreats):
+        for i in range(concset.ntreats):
             print("{:<12.0f} {:#.3g} %".format(i, sppe[i]))
         print("----------------------------------------------")
 
@@ -390,7 +396,7 @@ class pyGUTSred(parspace.PyParspace):
     def survfrac(self,conc,timevector,modelpars, level):
         return(self.model.calc_surv_sd_const(timevector,conc,modelpars)[-1] - (1-level))
 
-    def validate(self):
+    def validate(self, validationfile, hbfix = 0):
         pass
 
     def lpx_calculation(self):
