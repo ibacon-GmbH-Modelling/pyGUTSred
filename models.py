@@ -118,20 +118,22 @@ class GUTSmodels:
                  parbound_lower, parbound_upper,
                  nbinsperday=96):
         self.variant = variant
-        self.conctime = concstruct.time # might want to simplify this
-        self.ntreats = concstruct.ntreats
-        self.concdata = concstruct.concarray
-        self.concslopes = concstruct.concslopes
-        self.concconst = concstruct.concconst
-        self.datatime = survstruct.time
-        # create an extended time vector to ensure that the numerical integration is reliable
+        self.ndatasets = len(survstruct)
+        self.concstruct = concstruct
+        self.datastruct = survstruct
         self.nbinsperday = nbinsperday
-        self.timeext = np.linspace(0,self.datatime[-1],nbinsperday*int(self.datatime[-1]))
-        self.timeext = np.append(self.datatime,self.timeext)  # to make sure we are not skipping datapoints
-        self.timeext = np.unique(self.timeext)
-        self.index_commontime=np.intersect1d(self.timeext,self.datatime,
-                                             return_indices=True,assume_unique=True)[1]
-        self.deathdata = survstruct.deatharray
+        self.timeext = []
+        self.index_commontime = [] #np.array([])
+        for i in range(self.ndatasets):
+            timeexttmp = np.linspace(0,self.datastruct[i].time[-1],
+                                  nbinsperday*int(self.datastruct[i].time[-1]))
+            timeexttmp = np.append(self.datastruct[i].time,timeexttmp)  # to make sure we are not skipping datapoints            
+            timeexttmp = np.unique(timeexttmp)
+            self.timeext.append(timeexttmp)
+            self.index_commontime.append(np.intersect1d(self.timeext[i],self.datastruct[i].time,
+                                         return_indices=True,assume_unique=True)[1])
+        
+        # attributes that deal with the model parameters
         self.parnames = np.array(parnames,dtype=object)   # make sure these are numpy arrays
         self.parvals = np.array(parvals)
         self.islog = np.array(islog)                   # make sure these are numpy arrays	
@@ -146,24 +148,24 @@ class GUTSmodels:
         self.calc_surv_sd_trapz = calc_surv_sd_trapz
         self.guts_itmodel       = guts_itmodel
 
-    def calc_damage(self, kd, indtreat, constc):
+    def calc_damage(self, kd, timeext, conctime, concdata, concslopes, constc):
         if constc:
-            damage = calc_damage_const(self.timeext, self.concdata[indtreat,0],kd)
+            damage = calc_damage_const(timeext, concdata[0], kd)
         else:
-            damage = damage_linear_calc(kd, self.timeext, self.conctime,
-                                        self.concdata[indtreat], self.concslopes[indtreat])
+            damage = damage_linear_calc(kd, timeext, conctime,
+                                        concdata, concslopes)
         return(damage)
 
-    def calc_survival(self, indtreat, damage, pars, consc):
+    def calc_survival(self, timeext, concdata, damage, pars, consc):
         if self.variant == 'SD':
             if consc:
-                survival = calc_surv_sd_const(self.timeext,
-                                              self.concdata[indtreat,0],
+                survival = calc_surv_sd_const(timeext,
+                                              concdata[0],
                                               pars)
             else:
-                survival = calc_surv_sd_trapz(self.timeext, damage,pars[1:])
+                survival = calc_surv_sd_trapz(timeext, damage, pars[1:])
         else:
-            survival = guts_itmodel(self.timeext, damage,pars[1:])
+            survival = guts_itmodel(timeext, damage, pars[1:])
         return(survival)
 
     def log_likelihood(self, theta, allpars, posfree):
@@ -171,11 +173,18 @@ class GUTSmodels:
         # TODO: try to insert this statement in the compiled functions to have a faster calculation
         modelpars = 10**allpars*self.islog + allpars*(1-self.islog)
         llik = 0
-        i =0
-        while i < self.ntreats:
-            damage = self.calc_damage(modelpars[0],i,self.concconst[i])
-            surviv = self.calc_survival(i,damage,modelpars,self.concconst[i])             
-            llik += loglikelihood(surviv,self.index_commontime,
-                                  self.deathdata[i])
-            i+=1
+        nd=0
+        while nd < self.ndatasets: # this could be run in parallel (or directly back in the parspace explorer)
+            i =0
+            while i < self.concstruct[nd].ntreats:
+                damage = self.calc_damage(modelpars[0],self.timeext[nd], self.concstruct[nd].time, 
+                                          self.concstruct[nd].concarray[i], self.concstruct[nd].concslopes[i],
+                                          self.concstruct[nd].concconst[i])
+                surviv = self.calc_survival(self.timeext[nd], self.concstruct[nd].concarray[i],
+                                            damage, modelpars,
+                                            self.concstruct[nd].concconst[i])             
+                llik += loglikelihood(surviv,self.index_commontime[nd],
+                                      self.datastruct[nd].deatharray[i])
+                i+=1
+            nd+=1
         return(llik)
