@@ -23,7 +23,14 @@ if __name__ == '__main__':
     #ITfit = pg.pyGUTSred.load_class("test_ITsample.pkl")
     #ITfit = pg.pyGUTSred("datasets/ringtest_A_IT.txt", "IT", hbfree=True)
     #ITfit.run_and_time_parspace()
-    SDfit2 = pg.pyGUTSred(["datasets/ringtest_B_constant.txt", "datasets/ringtest_A_SD.txt"], "SD", hbfree=True)
-    SDfit2.run_and_time_parspace()
-    SDfit2.plot_data_model(fit=2)
-    SDfit2.EFSA_quality_criteria()
+    SDfit2 = pg.pyGUTSred(["datasets/ringtest_B_constant.txt","datasets/ringtest_B_pulsed.txt"], "SD", hbfree=False)
+    # SDfit2.run_and_time_parspace()
+    # SDfit2.plot_data_model(fit=2)
+    # # SDfit2.EFSA_quality_criteria()
+
+    # newdataset = SDfit2._readfile("datasets/ringtest_A_SD.txt")
+    # datastr = np.array([newdataset[1]])
+    # concstr = np.array([newdataset[0]])
+    # datastr[0].timeext = SDfit2.model.calc_ext_time(datastr[0])[0]
+    # datastr[0].index_commontime = SDfit2.model.calc_ext_time(datastr[0])[1]
+    

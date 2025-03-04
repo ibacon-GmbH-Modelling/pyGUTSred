@@ -175,18 +175,19 @@ class GUTSmodels:
 
     def log_likelihood(self, theta, allpars, posfree):
         allpars[posfree] = theta
-        # TODO: try to insert this statement in the compiled functions to have a faster calculation
+        # TODO: make sure that for each dataset the respective hb value is correctly passed
         modelpars = 10**allpars*self.islog + allpars*(1-self.islog)
         llik = 0
         nd=0
         while nd < self.ndatasets: # this could be run in parallel (or directly back in the parspace explorer)
+            modelpars_nd = np.concatenate((modelpars[:3],[modelpars[3+nd]]))
             i =0
             while i < self.concstruct[nd].ntreats:
-                damage = self.calc_damage(modelpars[0],self.timeext[nd], self.concstruct[nd].time, 
+                damage = self.calc_damage(modelpars_nd[0],self.timeext[nd], self.concstruct[nd].time, 
                                           self.concstruct[nd].concarray[i], self.concstruct[nd].concslopes[i],
                                           self.concstruct[nd].concconst[i])
                 surviv = self.calc_survival(self.timeext[nd], self.concstruct[nd].concarray[i],
-                                            damage, modelpars,
+                                            damage, modelpars_nd,
                                             self.concstruct[nd].concconst[i])             
                 llik += loglikelihood(surviv,self.index_commontime[nd],
                                       self.datastruct[nd].deatharray[i])

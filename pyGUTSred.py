@@ -83,9 +83,11 @@ class pyGUTSred(parspace.PyParspace):
                                                         np.transpose([self.concstruct[i].concarray[:,-1]+self.concstruct[i].concslopes[:,-1]*(self.datastruct[i].time[-1]-self.concstruct[i].time[-2])]),
                                                         axis=1)
         if variant == 'SD':
-            self.parnames = ["kd","bs","zs","hb"]
+            self.parnames = ["kd","bs","zs"]
         else:
-            self.parnames = ["kd","Fs","zs","hb"]
+            self.parnames = ["kd","Fs","zs"]
+        for i in range(self.ndatasets):
+            self.parnames = self.parnames+["hb%d"%(i+1)]
         if preset:
             self._preset_pars()
         else:
@@ -97,7 +99,9 @@ class pyGUTSred(parspace.PyParspace):
             self.isfree = isfree
             if len(parvalues) != 4 or len(lbound) != 4 or len(ubound) != 4 or len(islog) != 4 or len(isfree) != 4:
                 raise ValueError("need to set all the various parameters")
-            
+        if self.hbfree == False:
+            print("fit hb to control data")
+            self.fit_hb()    
         self.model = models.GUTSmodels(self.datastruct,self.concstruct,self.variant,
                                        self.parnames,self.parvalues,self.islog,self.isfree,
                                        self.lbound,self.ubound)
@@ -106,10 +110,7 @@ class pyGUTSred(parspace.PyParspace):
             self.datastruct[i].timeext = self.model.timeext[i]
             self.datastruct[i].index_commontime = self.model.index_commontime[i]
         print("precompile the functions")
-        self.model.log_likelihood(self.parvalues,self.parvalues,self.model.posfree)
-        if self.hbfree == False:
-            print("fit hb to control data")
-            self.fit_hb()
+        self.model.log_likelihood(self.parvalues[self.model.posfree],self.parvalues,self.model.posfree)
         print("setup the parameter space explorer")
         self.parspacesetup = parspace.SettingParspace(rough=rough,profile=profile)
         super().__init__(self.parspacesetup,self.model)
@@ -151,14 +152,18 @@ class pyGUTSred(parspace.PyParspace):
         return((concclass(np.array(concdata)), dataclass(np.array(survdata))))
 
     def _preset_pars(self):
-        self.isfree = np.array([1,1,1,0])
-        self.islog = np.array([1,1,0,0])
-        self.lbound = np.zeros(4)
-        self.ubound = np.zeros(4)
+        #FIX this
+        # need to set up the conditions with multiple
+        # values for the background mortality depending
+        # on the number of datasets
+        self.isfree = np.concatenate(([1,1,1],[0]*self.ndatasets)) # last positions are for the hb values
+        self.islog = np.concatenate(([1,1,0],[0]*self.ndatasets))
+        self.lbound = np.zeros(3+self.ndatasets)
+        self.ubound = np.zeros(3+self.ndatasets)
         if self.hbfree:
-            self.isfree[-1] = 1
-        self.lbound[-1] = 1e-6
-        self.ubound[-1] = 0.07
+            self.isfree[-self.ndatasets:] = 1
+        self.lbound[-self.ndatasets:] = 1e-6
+        self.ubound[-self.ndatasets:] = 0.07
 
         tmptime = []
         tmpconcm = []
@@ -204,13 +209,14 @@ class pyGUTSred(parspace.PyParspace):
 
     # TODO: modify for multiple datasets
     def fit_hb(self):
-        res = sp.optimize.minimize(models.hb_fit_ll, 
-                                   x0=self.parvalues[-1], 
-                                   args=(self.datastruct.time,self.model.deathdata[0]),
+        for i in range(self.ndatasets):
+            res = sp.optimize.minimize(models.hb_fit_ll, 
+                                   x0=self.parvalues[2+(i+1)], 
+                                   args=(self.datastruct[i].time,self.datastruct[i].deatharray[0]),
                                    method='Nelder-Mead',
-                                   bounds=[(self.lbound[-1], self.ubound[-1])])
-        self.parvalues[-1] = res.x
-        print("hb fitted to control data: %.4f"%(self.parvalues[-1]))
+                                   bounds=[(self.lbound[2+(i+1)], self.ubound[2+(i+1)])])
+            self.parvalues[2+(i+1)] = res.x
+            print("hb fitted to control data for dataset %d: %.4f"%(i+1,self.parvalues[2+(i+1)]))
 
     def run_and_time_parspace(self):
         start = time.time()
@@ -218,7 +224,7 @@ class pyGUTSred(parspace.PyParspace):
         stop = time.time()
         print("Elapsed time for the parameter space exploration: %.4f"%(stop-start))
 
-    def plot_data_model(self, fit=0, dataset=None, concset=None, modellabel='model', add_obspred=True):
+    def plot_data_model(self, fit=0, datastruct=None, concstruct=None, modellabel='model', add_obspred=True):
         '''
         Function to plot data and/or model
 
@@ -230,13 +236,13 @@ class pyGUTSred(parspace.PyParspace):
             modellabel : string
                 Customize model fit label (defualt "model")
         '''
-        if ((dataset == None) | (concset == None)):
-            dataset = self.datastruct
-            concset = self.concstruct
         if fit in [0,1,2]:
-            for nd in range(self.ndatasets):
-                dataset = self.datastruct[nd]
-                concset = self.concstruct[nd]
+            if ((datastruct == None) | (concstruct == None)):
+                datastruct = self.datastruct
+                concstruct = self.concstruct
+            for nd in range(len(datastruct)):
+                dataset = datastruct[nd]
+                concset = concstruct[nd]
                 fig = plt.figure()
                 ax = fig.subplots(2,dataset.ntreats)
                 cmax = np.max(concset.concmax)
@@ -256,11 +262,13 @@ class pyGUTSred(parspace.PyParspace):
                 ax[1,0].set_ylabel("Survival")
                 plt.tight_layout()
                 if fit>0:
-                    modelpars = 10**self.fullset*self.islog + self.fullset*(1-self.islog)
+                    modelpars = np.copy(10**self.fullset*self.islog + self.fullset*(1-self.islog))
+                    modelpars = modelpars[[0,1,2]+[3+nd]]
+                    survmodelprob = np.zeros_like(dataset.survprobs)
+                    # FIX THIS!!
                     if add_obspred:
                         fig2 = plt.figure()
-                        ax2 = fig2.subplots(1,2)
-                        survmodelprob = np.zeros_like(dataset.survprobs)
+                        ax2 = fig2.subplots(1,2)                        
                         ax2[0].plot([0,1],[0,1], 'k--',lw=0.5,label='')
                         ax2[1].plot([0,1],[0,1], 'k--',lw=0.5,label='')
                         ax2[0].set_xlabel("Observerd survival probability")
@@ -269,12 +277,12 @@ class pyGUTSred(parspace.PyParspace):
                         ax2[1].set_ylabel("Predicted deaths per interval")
                     for i in range(dataset.ntreats):
                         nmax = 1#dataset.survdata[0,i+1]
-                        damage = self.model.calc_damage(modelpars[0],dataset.timeext, self.concstruct[nd].time, 
-                                                        self.concstruct[nd].concarray[i], self.concstruct[nd].concslopes[i],
-                                                        self.concstruct[nd].concconst[i])
-                        survival = self.model.calc_survival(dataset.timeext, self.concstruct[nd].concarray[i],
+                        damage = self.model.calc_damage(modelpars[0],dataset.timeext, concset.time, 
+                                                        concset.concarray[i], concset.concslopes[i],
+                                                        concset.concconst[i])
+                        survival = self.model.calc_survival(dataset.timeext, concset.concarray[i],
                                                             damage, modelpars,
-                                                            self.concstruct[nd].concconst[i])
+                                                            concset.concconst[i])
                         survmodelprob[i] = survival[dataset.index_commontime]
                         ax[0,i].plot(dataset.timeext, damage, label=modellabel,color='k', linestyle='--')
                         ax[1,i].plot(dataset.timeext, nmax*survival, label=modellabel)
@@ -295,12 +303,13 @@ class pyGUTSred(parspace.PyParspace):
                             for j in range(len(self.propagationset)):
                                 pars95[self.posfree] = self.propagationset[j]
                                 pars95 = 10**pars95*self.islog + pars95*(1-self.islog)
-                                damlines[j,:] = self.model.calc_damage(pars95[0], dataset.timeext, self.concstruct[nd].time, 
-                                                        self.concstruct[nd].concarray[i], self.concstruct[nd].concslopes[i],
-                                                        self.concstruct[nd].concconst[i])
-                                surlines[j,:] = self.model.calc_survival(dataset.timeext, self.concstruct[nd].concarray[i],
-                                                                         damlines[j,:], pars95,
-                                                                         self.concstruct[nd].concconst[i])
+                                pars95_nd = pars95[[0,1,2]+[3+nd]]
+                                damlines[j,:] = self.model.calc_damage(pars95_nd[0], dataset.timeext, concset.time, 
+                                                        concset.concarray[i], concset.concslopes[i],
+                                                        concset.concconst[i])
+                                surlines[j,:] = self.model.calc_survival(dataset.timeext, concset.concarray[i],
+                                                                         damlines[j,:], pars95_nd,
+                                                                         concset.concconst[i])
                             damlineup   = damlines.max(axis=0)
                             damlinedown = damlines.min(axis=0)
                             surlineup   = surlines.max(axis=0)
@@ -320,14 +329,14 @@ class pyGUTSred(parspace.PyParspace):
         else:
             print("fit can be only 0 (data only), 1 (data and best fit), or 2 (data, best fit, and confidence interval)")
 
-    # TODO: modify for multiple datasets
-    def EFSA_quality_criteria(self, dataset = None, concset = None):
+
+    def EFSA_quality_criteria(self, datastruct = None, concstruct = None):
         if ((dataset == None) | (concset == None)):
-            dataset = self.datastruct
-            concset = self.concstruct
+            datastruct = self.datastruct
+            concstruct = self.concstruct
         for nd in range(self.ndatasets):
-            dataset = self.datastruct[nd]
-            concset = self.concstruct[nd]
+            dataset = datastruct[nd]
+            concset = concstruct[nd]
             ssq_fit = 0
             ssq_fit0 = 0
             ssq_fitnum = 0
