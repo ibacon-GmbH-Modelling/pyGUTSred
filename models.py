@@ -125,14 +125,9 @@ class GUTSmodels:
         self.timeext = []
         self.index_commontime = [] #np.array([])
         for i in range(self.ndatasets):
-            timeexttmp = np.linspace(0,self.datastruct[i].time[-1],
-                                  nbinsperday*int(self.datastruct[i].time[-1]))
-            timeexttmp = np.append(self.datastruct[i].time,timeexttmp)  # to make sure we are not skipping datapoints            
-            timeexttmp = np.unique(timeexttmp)
-            self.timeext.append(timeexttmp)
-            self.index_commontime.append(np.intersect1d(self.timeext[i],self.datastruct[i].time,
-                                         return_indices=True,assume_unique=True)[1])
-        
+            timeext, indexcommon = self.calc_ext_time(self.datastruct[i])
+            self.timeext.append(timeext)
+            self.index_commontime.append(indexcommon)
         # attributes that deal with the model parameters
         self.parnames = np.array(parnames,dtype=object)   # make sure these are numpy arrays
         self.parvals = np.array(parvals)
@@ -147,6 +142,16 @@ class GUTSmodels:
         self.calc_surv_sd_const = calc_surv_sd_const
         self.calc_surv_sd_trapz = calc_surv_sd_trapz
         self.guts_itmodel       = guts_itmodel
+
+    def calc_ext_time(self, datastruct):
+        timeexttmp = np.linspace(0, datastruct.time[-1],
+                                 self.nbinsperday*int(datastruct.time[-1]))
+        timeexttmp = np.append(datastruct.time,timeexttmp)  # to make sure we are not skipping datapoints            
+        timeexttmp = np.unique(timeexttmp)
+        index_commontime = np.intersect1d(timeexttmp,datastruct.time,
+                                          return_indices=True,assume_unique=True)[1]
+        return timeexttmp, index_commontime
+        
 
     def calc_damage(self, kd, timeext, conctime, concdata, concslopes, constc):
         if constc:

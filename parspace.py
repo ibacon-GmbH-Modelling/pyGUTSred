@@ -217,6 +217,9 @@ class SettingParspace:
             self.n_max = 4;  # maximum number of rounds for the algorithm (default 12)
 
 
+def parameter_profile_sub_wrapper(index, instance):
+    return instance._parameter_profile_sub(index)
+
 class PyParspace:
     '''
     Class for a minimizer that uses a parameter space explorer algorithm
@@ -428,7 +431,7 @@ class PyParspace:
         coll_ok = np.ones((gridsz*10,npars)) * np.inf
         coll_okL = np.ones(gridsz*10) * np.inf
         ind_ok =0
-        pbest = np.array([])
+        pbest = np.copy(self.coll_all[0,:]) # initialize to the best likelihood value so far
 
         parprof = np.zeros((gridsz,npars+1))
 
@@ -504,7 +507,7 @@ class PyParspace:
             parprof[i_g,:] = np.concatenate((pmat_tst, [mll_tst]),axis=0)
 
         # running the profiling in reverse to keep optimizing
-        for i_g in range(gridsz-2,0,-1):
+        for i_g in range(gridsz-2,-1,-1):
             mll_tst1 = parprof[i_g,-1]
             pmat_tst2= np.copy(parprof[i_g+1,:-1])
             pmat_tst2[index] = np.copy(parprof[i_g,index])
@@ -538,7 +541,7 @@ class PyParspace:
             pmat_tst[index] = max(pmat_tst[index], self.model.parbound_lower[self.posfree[index]]) # make sure it is not below lower bound
             allpars = self._startp
             allpars[self.posfree]=pmat_tst
-            phat_tst,mll_tst = self._NM_minimizer(np.delete(pmat_tst2,index), 
+            phat_tst,mll_tst = self._NM_minimizer(np.delete(pmat_tst,index), 
                                                   allpars, posfree, rough=1) # do a rough optimisation first
             phat_tst,mll_tst = self._NM_minimizer(phat_tst, 
                                                   allpars, posfree, rough=1) # do a normal optimisation after
@@ -564,7 +567,7 @@ class PyParspace:
             pmat_tst[index] = min(pmat_tst[index], self.model.parbound_upper[self.posfree[index]])
             allpars = self._startp
             allpars[self.posfree]=pmat_tst
-            phat_tst,mll_tst = self._NM_minimizer(np.delete(pmat_tst2,index), 
+            phat_tst,mll_tst = self._NM_minimizer(np.delete(pmat_tst,index), 
                                                   allpars, posfree, rough=1)
             phat_tst,mll_tst = self._NM_minimizer(phat_tst,
                                                   allpars, posfree, rough=0)
@@ -584,12 +587,13 @@ class PyParspace:
                 parprof = np.column_stack((parprof[:,0], self._applylog(parprof[:,0])))
 
         # collect these results in separate attributes, might be needed later
-        self.coll_ok = np.append(coll_ok, coll_okL[:,None], axis=1)
-        self.coll_ok = self.coll_ok[0:ind_ok,:]
-        self.mll = mll
-        self.pbest = pbest
-        
-        return(parprof)
+        # self.coll_ok = np.append(coll_ok, coll_okL[:,None], axis=1)
+        # self.coll_ok = self.coll_ok[0:ind_ok,:]
+        # self.mll = mll
+        #self.pbest = pbest
+        coll_ok = np.append(coll_ok, coll_okL[:,None], axis=1)
+        coll_ok = coll_ok[0:ind_ok,:]
+        return parprof, pbest, coll_ok
     
     def _print_results(self, profile=None):
         if self.opts.profile:
@@ -946,19 +950,29 @@ class PyParspace:
             # perform a profile likelihood to determine the confidence intervals
             n_rnd = n_rnd+1
             print("Starting round ",n_rnd," for profile likelihood of each parameter")
-            parprofile=list()
+            parprofile=[0]*4
+            pbest = np.zeros((self.npars,self.npars+1))
             parprofile2=list()
             # TESTING PROFILING WITH REDUCED SAMPLE. REMOVE AFTER TESTING
             # self.coll_all = np.copy(self.coll_all[np.unique(np.sort(np.random.randint(0,len(coll_allL),500)))])
             # END TEST
-            for i in range(self.npars):
-                parprofile.append(self._parameter_profile_sub(i))
+            
+            # for i in range(self.npars):
+            #     parprofile.append(self._parameter_profile_sub(i))
+
             # TODO: fix the parallel implementation. As it is, does not work
-            # with mp.Pool(mp.cpu_count()) as pool:
-            #     parprofile = pool.map(self._parameter_profile_sub, range(self.npars))
+            with mp.Pool(mp.cpu_count()) as pool:
+                results = pool.starmap(parameter_profile_sub_wrapper, [(i, self) for i in range(self.npars)])
+                parprofile, pbest, coll_ok = zip(*results)
+            # for i in range(self.npars):
+            #     parprofile[i], pbest[i] = parameter_profile_sub_wrapper(i,self)
             # TODO proper pruning of the profiling results
+            self.pbest = pbest[np.argmin([p[-1] for p in pbest])]
+            #self.coll_ok = coll_ok[np.argmin([p[-1] for p in pbest])] # take the best value
+            self.coll_ok = np.concatenate((coll_ok), axis=0)
             flag_short = 0 # for now we do not do anything with it. It needs to be defined for the pruning
-            if self.pbest.size > 0:
+            #if self.pbest.size > 0:
+            if self.pbest[-1] < mll:
                 print("The profiling found a new minimum. Optimizing from here")
                 pfit,llog = self._NM_minimizer(self.pbest[:-1],self._startp,self.posfree, rough=0)
                 self.coll_all = np.append([np.concatenate((pfit, [llog]))], self.coll_all, axis=0)
@@ -1020,9 +1034,14 @@ class PyParspace:
                         print("Starting round ",n_rnd,", refining the profile likelihoods for each parameter again")
                         n_test = n_test + 1
                         parprofile2 = list()
-                        for i in range(self.npars):
-                            parprofile2.append(self._parameter_profile_sub(i))
-                        if self.pbest.size > 0:
+                        # for i in range(self.npars):
+                        #     parprofile2.append(self._parameter_profile_sub(i))
+                        with mp.Pool(mp.cpu_count()) as pool:
+                            results = pool.starmap(parameter_profile_sub_wrapper, [(i, self) for i in range(self.npars)])
+                            parprofile2, pbest, coll_ok = zip(*results)
+                        self.pbest = pbest[np.argmin([p[-1] for p in pbest])]
+                        self.coll_ok = coll_ok[np.argmin([p[-1] for p in pbest])] # take the best value
+                        if self.pbest[-1] < mll:
                             self.coll_all = np.append([self.pbest], self.coll_all, axis=0)
                             ind_final = np.argwhere(self.coll_all[:,-1] < self.coll_all[0,-1]+chicrit_joint).flatten().max()
                             ind_single = np.argwhere(self.coll_all[:,-1] < self.coll_all[0,-1]+chicrit_single).flatten().max()
