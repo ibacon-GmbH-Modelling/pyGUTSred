@@ -729,7 +729,9 @@ class PyParspace:
         f_d = self.opts.f_d
         n_ok = self.opts.n_ok[self.npars-1]
         n_conf = self.opts.n_conf_all[self.npars-1]
-        tries_1 = self.opts.tries[self.posfree] # * np.ones((1,self.npars))
+        #tries_1 = self.opts.tries[self.posfree] # * np.ones((1,self.npars)) #add support for multiple hb values
+        tries_1 = np.concatenate((self.opts.tries, [self.opts.tries[-1]]*(self.model.ndatasets-1)))
+        tries_1 = tries_1[self.posfree]
         n_max = self.opts.n_max
         
         # We work here with the log-likelihood itself, so the chi2 criterion needs to be divided by 2.

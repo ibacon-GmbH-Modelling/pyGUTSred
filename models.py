@@ -136,12 +136,6 @@ class GUTSmodels:
         self.posfree = np.argwhere(self.isfree == 1).flatten()
         self.parbound_lower = np.array(parbound_lower) # make sure these are numpy arrays
         self.parbound_upper = np.array(parbound_upper) # make sure these are numpy arrays
-        # make the intermediate functions be also part of the class
-        self.calc_damage_const  = calc_damage_const
-        self.damage_linear_calc = damage_linear_calc
-        self.calc_surv_sd_const = calc_surv_sd_const
-        self.calc_surv_sd_trapz = calc_surv_sd_trapz
-        self.guts_itmodel       = guts_itmodel
 
     def calc_ext_time(self, datastruct):
         timeexttmp = np.linspace(0, datastruct.time[-1],
