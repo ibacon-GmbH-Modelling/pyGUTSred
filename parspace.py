@@ -367,22 +367,23 @@ class PyParspace:
         return (mutatesample_nonan, mutatellog_nonan)
     
     def _test_profile(self, coll_all, parprofile, settings):
+        # FIX this function because it feels like it is not working properly
         ind_fit = np.copy(self.posfree)
-        coll_ok = np.array([])
+        coll_ok = np.zeros((0,self.npars+1))
         coll_all = np.copy(coll_all)
         flag_profile = [0, 0]
         chicrit_single = 0.5 * settings.crit_table[0]
         mll = coll_all[0,-1]
         for i_p in range(self.npars):
             parprof = np.copy(parprofile[i_p])
-            coll_tst = coll_all[coll_all[:,-1] < mll + chicrit_single+1,:]
+            coll_tst = coll_all[coll_all[:,-1] < (mll + chicrit_single+1),:]
             if (min(coll_tst[:,i_p]) < min(parprof[:,i_p])) | (max(coll_tst[:,i_p]) > max(parprof[:,i_p])):
                 # the profile is not good enough
                 flag_profile[0] = 1
                 flag_profile[1] = np.inf
                 # this should be checked carefully, see note in Tjalling's code
-            parprof = parprof[parprof[:,-1] < mll + chicrit_single+1,:] # keep important parts
-            for i_g in range(2,parprof.shape[0]-1):
+            parprof = parprof[parprof[:,-1] < (mll + chicrit_single+1),:] # keep important parts
+            for i_g in range(1,parprof.shape[0]-1):
                 gridsp = 0.5 * np.diff(parprof[[i_g-1,i_g,i_g+1], i_p], axis=0)
                 ind_tst_tmp1 = np.argwhere(coll_all[:,i_p] > (parprof[i_g,i_p]-gridsp[0])).flatten()
                 ind_tst_tmp2 = np.argwhere(coll_all[:,i_p] < (parprof[i_g,i_p]+gridsp[1])).flatten()
@@ -393,12 +394,12 @@ class PyParspace:
                     ind_tst = np.argmin(np.abs(coll_all[:,i_p] - parprof[i_g, i_p]))
                     mll_compare = np.inf
                 else:
-                    ind_tst = min(ind_tst)
+                    ind_tst = np.min(ind_tst)
                     mll_compare = coll_all[ind_tst,-1]
                 mll_prof = parprof[i_g,-1]
                 if mll_prof < mll_compare:
-                    if mll_compare - mll_prof > self.opts.gap_extra:
-                        tmp = np.append(coll_all[ind_tst,:], parprof[i_g,:], axis=0)
+                    if (mll_compare - mll_prof) > self.opts.gap_extra:
+                        tmp = np.append([coll_all[ind_tst,:]], [parprof[i_g,:]], axis=0)
                         coll_ok = np.append(coll_ok, tmp, axis=0)
                 elif mll_compare < mll_prof:
                     # sample is better then profile, so we will need a new profiling round
@@ -408,9 +409,9 @@ class PyParspace:
                         # print(flag_profile)
                         # print("this should go here",mll_compare - min_MLL)
                         flag_profile[0] = flag_profile[0]+1
-                        flag_profile[1] = max(flag_profile[1], mll_compare - min_MLL)
-        coll_ok = np.reshape(coll_ok, (coll_ok.shape[0]//(self.npars+1), self.npars+1))
+                        flag_profile[1] = max(flag_profile[1], min_MLL-mll_compare)
         self.coll_ok = np.copy(coll_ok) # overwrite the coll_ok sample
+        # print(self.coll_ok)
         return flag_profile
 
     def _parameter_profile_sub(self,index):
@@ -461,7 +462,7 @@ class PyParspace:
             allpars[self.posfree]=pmat_tst1
             posfree = np.delete(self.posfree,index)
             
-            phat_tst1,mll_tst1 = self._NM_minimizer(np.delete(pmat_tst1,index),allpars, posfree, rough=1)
+            phat_tst1,mll_tst1 = self._NM_minimizer(np.delete(pmat_tst1,index),allpars, posfree, rough=0)
 
             allpars[self.posfree[index]] = par_rng[i_g]
             allpars[posfree] = phat_tst1
@@ -473,7 +474,7 @@ class PyParspace:
                 pmat_tst2[index] = par_rng[i_g] 
                 allpars = self._startp
                 allpars[self.posfree]=pmat_tst2
-                phat_tst2,mll_tst2 = self._NM_minimizer(np.delete(pmat_tst2,index),allpars, posfree, rough = 1)
+                phat_tst2,mll_tst2 = self._NM_minimizer(np.delete(pmat_tst2,index),allpars, posfree, rough = 0)
                 allpars[posfree] = phat_tst2
             else:
                 mll_tst2 = np.inf
@@ -542,9 +543,9 @@ class PyParspace:
             allpars = self._startp
             allpars[self.posfree]=pmat_tst
             phat_tst,mll_tst = self._NM_minimizer(np.delete(pmat_tst,index), 
-                                                  allpars, posfree, rough=1) # do a rough optimisation first
+                                                  allpars, posfree, rough=0) # do a rough optimisation first
             phat_tst,mll_tst = self._NM_minimizer(phat_tst, 
-                                                  allpars, posfree, rough=1) # do a normal optimisation after
+                                                  allpars, posfree, rough=0) # do a normal optimisation after
             allpars[posfree] = phat_tst
             parprof = np.append([np.concatenate((allpars[self.posfree],[mll_tst]),axis=0)],parprof,axis=0)
             coll_ok[ind_ok,:]=np.copy(allpars[self.posfree])
@@ -568,7 +569,7 @@ class PyParspace:
             allpars = self._startp
             allpars[self.posfree]=pmat_tst
             phat_tst,mll_tst = self._NM_minimizer(np.delete(pmat_tst,index), 
-                                                  allpars, posfree, rough=1)
+                                                  allpars, posfree, rough=0)
             phat_tst,mll_tst = self._NM_minimizer(phat_tst,
                                                   allpars, posfree, rough=0)
             allpars[posfree] = phat_tst
@@ -585,7 +586,6 @@ class PyParspace:
 
         if self.npars == 1:
                 parprof = np.column_stack((parprof[:,0], self._applylog(parprof[:,0])))
-
         # collect these results in separate attributes, might be needed later
         # self.coll_ok = np.append(coll_ok, coll_okL[:,None], axis=1)
         # self.coll_ok = self.coll_ok[0:ind_ok,:]
@@ -748,6 +748,9 @@ class PyParspace:
         sample = sampler.random(n=n_tries) 
         l_bounds = self.model.parbound_lower[self.posfree]
         u_bounds = self.model.parbound_upper[self.posfree]
+        # print("par bounds")
+        # print(l_bounds)
+        # print(u_bounds)
         sample_scaled = qmc.scale(sample, l_bounds, u_bounds)
     
         d_grid = (np.array(u_bounds)-np.array(l_bounds))/tries_1
@@ -820,7 +823,20 @@ class PyParspace:
             print('  Status: ',ind_final,' sets within total CI and ',ind_single,' within inner. Best fit: %.4f'%coll_allL[0])   
 
             ## Insert slow kinetic check here
-
+            if ((((self.model.isfree[0]==1) & (self.model.isfree[2]==1)) & ((self.model.islog[2]==0) & (self.model.islog[0]==1))) & ((self.model.parbound_upper[2]/self.model.parbound_lower[2]) > 10)):                
+                coll_tst = coll_all[:max(ind_final,n_ok),:]
+                min_mw = min(coll_tst[:,2])
+                min_kd = min(coll_tst[:,0])
+                check_corr = np.corrcoef(np.log10(coll_tst[:,2]),coll_tst[:,0])
+                crit_mw = (min_mw - self.model.parbound_lower[2]) / (self.model.parbound_upper[2] - self.model.parbound_lower[2])
+                crit_kd = (min_kd - self.model.parbound_lower[0]) / (self.model.parbound_upper[0] - self.model.parbound_lower[0])
+                if (check_corr[0,1] > self.opts.slowkin_corr):
+                    if (crit_mw < self.opts.slowkin_pars) | (crit_kd < self.opts.slowkin_pars):
+                        # fix here
+                        lowerv = np.min(coll_tst, axis=0)                        
+                        upperv = np.max(coll_tst, axis=0)
+                        slwkin = -1
+                        return (slwkin,lowerv,upperv)
     
             if ind_final > n_conf[0]:
                 if ind_single > n_conf[1]:
@@ -954,7 +970,6 @@ class PyParspace:
             print("Starting round ",n_rnd," for profile likelihood of each parameter")
             parprofile=[0]*4
             pbest = np.zeros((self.npars,self.npars+1))
-            parprofile2=list()
             # TESTING PROFILING WITH REDUCED SAMPLE. REMOVE AFTER TESTING
             # self.coll_all = np.copy(self.coll_all[np.unique(np.sort(np.random.randint(0,len(coll_allL),500)))])
             # END TEST
@@ -972,7 +987,7 @@ class PyParspace:
             self.pbest = pbest[np.argmin([p[-1] for p in pbest])]
             #self.coll_ok = coll_ok[np.argmin([p[-1] for p in pbest])] # take the best value
             self.coll_ok = np.concatenate((coll_ok), axis=0)
-            flag_short = 0 # for now we do not do anything with it. It needs to be defined for the pruning
+            # flag_short = 0 # for now we do not do anything with it. It needs to be defined for the pruning
             #if self.pbest.size > 0:
             if self.pbest[-1] < mll:
                 print("The profiling found a new minimum. Optimizing from here")
@@ -1015,41 +1030,54 @@ class PyParspace:
                     coll_tries = np.append(coll_tries, coll_triesL[:,None], axis=1)
                     self.coll_all = np.append(self.coll_all, coll_tries, axis=0)
                     self.coll_all = self.coll_all[np.argsort(self.coll_all[:,-1])]
-                    self.coll_all = self.coll_all[self.coll_all[:,-1] < self.coll_all[0,-1] + chicrit_max,:]
+                    self.coll_all = self.coll_all[self.coll_all[:,-1] < (self.coll_all[0,-1] + chicrit_max),:]
 
                     ind_final = np.argwhere(self.coll_all[:,-1] < self.coll_all[0,-1]+chicrit_joint).flatten().max()
                     ind_single = np.argwhere(self.coll_all[:,-1] < self.coll_all[0,-1]+chicrit_single).flatten().max()
                     # test if the profile is very far from the sample
+                    # Print debugging info
+                    # print("n_tr_i ",n_tr_i)
+                    # print("f_d_i*d_grid ", f_d_i*d_grid)
+                    # print("size coll_tries ",coll_tries.shape)
+                    # print("size coll_tries ",coll_tries.shape)
+                    # print("size coll_all ",self.coll_all.shape)
+                    # print("ind_final: ",ind_final)
+                    # print("ind_single: ",ind_single)
+
                     flag_profile=self._test_profile(self.coll_all, parprofile, self.opts)
-                    #print(flag_profile) # DEBUG
+                    # print(self.coll_ok)
+                    # print("flag_profile")
+                    # print(flag_profile) # DEBUG
                     if ind_single < n_conf[1]:
                         ind_cont = np.argwhere(coll_tries[:,-1] < mll+self.opts.crit_add_extra).flatten().max()
-                        if ind_cont < 0.5 * n_conf[1]:
+                        print(ind_cont)
+                        if ind_cont < (0.5 * n_conf[1]):
                             self.coll_ok = np.append(self.coll_ok, coll_tries[0:ind_cont,:], axis=0)
                         else:
                             self.coll_ok = coll_tries[0:ind_cont,:]
-                        f_d_i = max(0.1, f_d_i * 0.7) # reduce jump size so as to contract he extra sampling
+                        f_d_i = max(0.1, f_d_i * 0.7) # reduce jump size so as to contract the extra sampling
                     elif (self.coll_ok.shape[0] > 0) & (n_rnd_x<5):
                         f_d_i = max(0.1,f_d_i * 0.7)
-                    elif ((flag_profile[1] > 0.05) | (flag_short==1)) & (n_test < 2):
+                    elif (flag_profile[1] > 0.05) & (n_test < 2):
                         n_rnd = n_rnd +1
                         print("Starting round ",n_rnd,", refining the profile likelihoods for each parameter again")
                         n_test = n_test + 1
-                        parprofile2 = list()
+                        parprofile = list() # overwrite the profile
                         # for i in range(self.npars):
-                        #     parprofile2.append(self._parameter_profile_sub(i))
+                        #     parprofile.append(self._parameter_profile_sub(i))
                         with mp.Pool(mp.cpu_count()) as pool:
                             results = pool.starmap(parameter_profile_sub_wrapper, [(i, self) for i in range(self.npars)])
-                            parprofile2, pbest, coll_ok = zip(*results)
+                            parprofile, pbest, coll_ok = zip(*results)
                         self.pbest = pbest[np.argmin([p[-1] for p in pbest])]
-                        self.coll_ok = coll_ok[np.argmin([p[-1] for p in pbest])] # take the best value
+                        #self.coll_ok = coll_ok[np.argmin([p[-1] for p in pbest])] # take the best value
+                        self.coll_ok = np.concatenate((coll_ok), axis=0)
                         if self.pbest[-1] < mll:
                             self.coll_all = np.append([self.pbest], self.coll_all, axis=0)
                             ind_final = np.argwhere(self.coll_all[:,-1] < self.coll_all[0,-1]+chicrit_joint).flatten().max()
                             ind_single = np.argwhere(self.coll_all[:,-1] < self.coll_all[0,-1]+chicrit_single).flatten().max()
                         print("Status: ", ind_final, " sets within total CI and ", ind_single, " within inner. Best fit: ", self.coll_all[0,-1])
                         if self.coll_ok.size>0:
-                            r_rnd_x = 0 # resetting extra counter
+                            n_rnd_x = 0 # resetting extra counter
                             f_d_i = self.opts.f_d_extra
                             print("Now profiling has detected gaps, which require additional sampling rounds.")
                     else:
@@ -1065,18 +1093,15 @@ class PyParspace:
             self.pbest = self.coll_all[0,:]
             self.model.parvals[self.posfree] = self.pbest[:-1]
             self.fullset = np.copy(self.model.parvals)
-            if len(parprofile2) > 0:
-                self._plot_samples(parprofile2)
-                self.profile = parprofile2
-            else:
-                self._plot_samples(parprofile)
-                self.profile = parprofile
+
+            self._plot_samples(parprofile)
+            self.profile = parprofile
             self._print_results(self.profile)
             
             ind_prop1 = np.argwhere(self.coll_all[:,-1] < mll + 0.5 * self.opts.crit_prop[0]).flatten().max()
             ind_prop2 = np.argwhere(self.coll_all[:,-1] < mll + 0.5 * self.opts.crit_prop[1]).flatten().max()
             self.propagationset = self.coll_all[ind_prop1:ind_prop2,:-1]
-        return
+        return (0,0,0)
     
     def replot_results(self):
         """

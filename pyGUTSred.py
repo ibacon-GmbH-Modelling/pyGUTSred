@@ -38,7 +38,7 @@ def readfile(filepath):
     print(concdata)
     
     survdata=survdata.apply(pd.to_numeric)
-    concdata=concdata.apply(pd.to_numeric)
+    concdata = concdata.apply(pd.to_numeric, errors='coerce')
     #self.concstruct=concclass(np.array(concdata))
     #self.datastruct=dataclass(np.array(survdata))
     return((concclass(np.array(concdata),concunits), dataclass(np.array(survdata))))
@@ -266,7 +266,7 @@ def EFSA_quality_criteria(datastruct, concstruct, model):
             print("{:<12.0f} {:#.3g} %".format(i, sppe[i]))
         print("----------------------------------------------")
 
-def validate(validationfile, fitmodel, propagationset,hbfix = True):
+def validate(validationfile, fitmodel, propagationset, hbfix = True):
         tmp = readfile(validationfile)
         valconc = np.array([])
         valdata = np.array([])
@@ -275,6 +275,8 @@ def validate(validationfile, fitmodel, propagationset,hbfix = True):
         model = deepcopy(fitmodel)
         valdata[0].timeext, valdata[0].index_commontime = model.calc_ext_time(valdata[0])
         model.parvals = model.parvals[:4]
+        model.islog = model.islog[:4]
+        model.islog[-1] = 0 # always force the 
         model.parbound_lower = model.parbound_lower[:4]
         model.parbound_upper = model.parbound_upper[:4]
         if hbfix:
@@ -285,7 +287,16 @@ def validate(validationfile, fitmodel, propagationset,hbfix = True):
                                    bounds=[(model.parbound_lower[-1], model.parbound_upper[-1])])
             model.parvals[-1] = res.x
             print("hb fitted to control data: %.4f"%(model.parvals[-1]))
-        EFSA_quality_criteria(np.array(valdata), np.array(valconc), model)        
+        print("Validation of model with %s variant"%model.variant)
+        EFSA_quality_criteria(np.array(valdata), np.array(valconc), model)
+        if propagationset is None:
+            plot_data_model(fit =1,datastruct=valdata,concstruct=valconc,model=model,propagationset=None)
+        else:
+            # This will need to change if I want to validate multiple datasets at the same time
+            fillhb = np.zeros((len(propagationset),1))
+            fillhb[:] = model.parvals[-1]
+            par95 = np.hstack((propagationset[:,model.posfree<3], fillhb))
+            plot_data_model(fit=2,datastruct=valdata,concstruct=valconc,model=model,propagationset=par95)
 
 class concclass:
     def __init__(self,concdata,concunits):
@@ -300,6 +311,19 @@ class concclass:
         self.concmax = np.zeros(self.ntreats)
         self.concunits = concunits
         for i in range(self.ntreats):
+            nans, x = np.isnan(self.concarray[i]), lambda z: z.nonzero()[0]
+            for nan_idx in np.where(nans)[0]:
+                if nan_idx == 0 or nan_idx == len(self.time) - 1:
+                    self.concarray[i][nan_idx] = np.nan
+                else:
+                    prev_idx = nan_idx - 1
+                    next_idx = nan_idx + 1
+                    while next_idx < len(self.time) and np.isnan(self.concarray[i][next_idx]):
+                        next_idx += 1
+                    if next_idx < len(self.time):
+                        self.concarray[i][nan_idx] = np.interp(self.time[nan_idx], [self.time[prev_idx], self.time[next_idx]], [self.concarray[i][prev_idx], self.concarray[i][next_idx]])
+                    else:
+                        self.concarray[i][nan_idx] = np.nan
             self.concslopes[i,:-1] = np.diff(self.concarray[i])/np.diff(self.time)
             self.conctwa[i] = np.trapz(self.concarray[i],self.time)/self.time[-1]
             self.concmax[i] = np.max(self.concarray[i])
@@ -470,8 +494,22 @@ class pyGUTSred(parspace.PyParspace):
             print("hb fitted to control data for dataset %d: %.4f"%(i+1,self.parvalues[2+(i+1)]))
 
     def run_and_time_parspace(self):
+        # wrapper around the parameter space explorer so that
+        # we can include meausures in case there is slow kinetic
         start = time.time()
-        self.run_parspace()
+        out = self.run_parspace()
+        if out[0]==-1:
+            print("slow kinetic was detected")
+            print("threshold parameter will be explored in logarithmic scale")
+            self.model.islog[2] = 1
+            self.parlabels[2] = "log10(%s)"%self.parlabels[2]
+            # update boundary for threshold
+            # self.model.parbound_upper[2] = min(np.log10(self.model.parbound_upper[2]),np.log10(out[2][self.model.posfree==2]*self.opts.slowkin_f_mw))
+            self.model.parbound_upper[2] = np.log10(self.model.parbound_upper[2])
+            self.model.parbound_lower[2] = np.log10(self.model.parbound_lower[2])
+            # update boundary for kd
+            # self.model.parbound_upper[0] = min(self.model.parbound_upper[0],out[2][self.model.posfree==0]*self.opts.slowkin_f_kd)
+            out = self.run_parspace()
         stop = time.time()
         print("Elapsed time for the parameter space exploration: %.4f"%(stop-start))
 
