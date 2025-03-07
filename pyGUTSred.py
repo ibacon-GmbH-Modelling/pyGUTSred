@@ -37,7 +37,7 @@ def readfile(filepath):
     print("exposure data:")
     print(concdata)
     
-    survdata=survdata.apply(pd.to_numeric)
+    survdata = survdata.apply(pd.to_numeric, errors='coerce')
     concdata = concdata.apply(pd.to_numeric, errors='coerce')
     #self.concstruct=concclass(np.array(concdata))
     #self.datastruct=dataclass(np.array(survdata))
@@ -143,12 +143,13 @@ def plot_data_model(fit, datastruct, concstruct, model, propagationset, modellab
             #nmax = np.max(dataset.survdata[:,1:])
             nmax = 1
             for i in range(dataset.ntreats):
-                ax[0,i].fill_between(concset.time,concset.concarray[i], label='Concentration', color='blue', alpha=0.2)
+                ax[0,i].fill_between(concset.timetr,concset.concarraytr[i], label='Concentration', color='blue', alpha=0.2)
                 ax[0,i].set_ylim([0, cmax*1.1])
-                yvals = dataset.survdata[:,i+1]/dataset.survdata[0,i+1]
-                deltalow = np.maximum(yvals-dataset.lowlim[i],0)
-                deltaup = np.maximum(dataset.upplim[i]-yvals,0)
-                ax[1,i].errorbar(dataset.time,yvals, 
+                #yvals = dataset.survdata[:,i+1]/dataset.survdata[0,i+1]
+                yvals = dataset.survprobstreat[i]
+                deltalow = np.maximum(yvals-dataset.lowlimtreat[i],0)
+                deltaup = np.maximum(dataset.upplimtreat[i]-yvals,0)
+                ax[1,i].errorbar(dataset.timetreat[i],yvals, 
                                  yerr=[deltalow,deltaup], fmt='o',label='Survival')
                 ax[1,i].set_xlabel("Time [d]")
                 ax[1,i].set_ylim([0, nmax*1.1])
@@ -158,7 +159,8 @@ def plot_data_model(fit, datastruct, concstruct, model, propagationset, modellab
             if fit>0:
                 modelpars = np.copy(10**model.parvals*model.islog + model.parvals*(1-model.islog))
                 modelpars = modelpars[[0,1,2]+[3+nd]]
-                survmodelprob = np.zeros_like(dataset.survprobs)
+                #survmodelprob = np.zeros_like(dataset.survprobs)
+                survmodelprob = []
                 # FIX THIS!!
                 if add_obspred:
                     fig2 = plt.figure()
@@ -171,49 +173,49 @@ def plot_data_model(fit, datastruct, concstruct, model, propagationset, modellab
                     ax2[1].set_ylabel("Predicted deaths per interval")
                 for i in range(dataset.ntreats):
                     nmax = 1#dataset.survdata[0,i+1]
-                    damage = model.calc_damage(modelpars[0],dataset.timeext, concset.time, 
+                    damage = model.calc_damage(modelpars[0],dataset.timeext[i], concset.time, 
                                                     concset.concarray[i], concset.concslopes[i],
                                                     concset.concconst[i])
-                    survival = model.calc_survival(dataset.timeext, concset.concarray[i],
+                    survival = model.calc_survival(dataset.timeext[i], concset.concarray[i],
                                                         damage, modelpars,
                                                         concset.concconst[i])
-                    survmodelprob[i] = survival[dataset.index_commontime]
-                    ax[0,i].plot(dataset.timeext, damage, label=modellabel,color='k', linestyle='--')
-                    ax[1,i].plot(dataset.timeext, nmax*survival, label=modellabel)
+                    survmodelprob.append(survival[dataset.index_commontime[i]])
+                    ax[0,i].plot(dataset.timeext[i], damage, label=modellabel,color='k', linestyle='--')
+                    ax[1,i].plot(dataset.timeext[i], nmax*survival, label=modellabel)
                     # here needs to be modified with actual names of the treatments
-                    ax2[0].plot(dataset.survprobs[i],survmodelprob[i], 'o', label = "Treatment %i"%(i)) 
-                    ax2[1].plot(dataset.deatharray[i],
-                                dataset.survarray[i,0]*np.append(-np.diff(survmodelprob[i]),
-                                                                [survmodelprob[i,-1]]),
+                    ax2[0].plot(dataset.survprobstreat[i],survmodelprob[i], 'o', label = "Treatment %i"%(i)) 
+                    ax2[1].plot(dataset.deatharraytreat[i],
+                                dataset.survarrtreat[i][0]*np.append(-np.diff(survmodelprob[i]),
+                                                                [survmodelprob[i][-1]]),
                                 'o',label = '')
                 maxdeaths = max(ax2[1].get_xlim()[1],ax2[1].get_ylim()[1])
                 ax2[1].plot([0,maxdeaths],[0,maxdeaths], 'k--',lw=0.5,label='')
                 ax2[0].legend(loc='lower right')
                 if (fit>1) & (propagationset is not None):
                     for i in range(dataset.ntreats):
-                        damlines = np.zeros((len(propagationset),len(dataset.timeext)))
-                        surlines = np.zeros((len(propagationset),len(dataset.timeext)))
+                        damlines = np.zeros((len(propagationset),len(dataset.timeext[i])))
+                        surlines = np.zeros((len(propagationset),len(dataset.timeext[i])))
                         pars95 = np.copy(model.parvals)
                         for j in range(len(propagationset)):
                             pars95[model.posfree] = propagationset[j]
                             pars95 = 10**pars95*model.islog + pars95*(1-model.islog)
                             pars95_nd = pars95[[0,1,2]+[3+nd]]
-                            damlines[j,:] = model.calc_damage(pars95_nd[0], dataset.timeext, concset.time, 
+                            damlines[j,:] = model.calc_damage(pars95_nd[0], dataset.timeext[i], concset.time, 
                                                     concset.concarray[i], concset.concslopes[i],
                                                     concset.concconst[i])
-                            surlines[j,:] = model.calc_survival(dataset.timeext, concset.concarray[i],
+                            surlines[j,:] = model.calc_survival(dataset.timeext[i], concset.concarray[i],
                                                                      damlines[j,:], pars95_nd,
                                                                      concset.concconst[i])
                         damlineup   = damlines.max(axis=0)
                         damlinedown = damlines.min(axis=0)
                         surlineup   = surlines.max(axis=0)
                         surlinedown = surlines.min(axis=0)
-                        ax[0,i].fill_between(dataset.timeext,damlinedown,damlineup, color='gray', alpha=0.5, label='95% CI')
-                        ax[1,i].fill_between(dataset.timeext,surlinedown,surlineup, color='gray', alpha=0.5, label='95% CI')
-                        ax2[0].errorbar(dataset.survprobs[i],
+                        ax[0,i].fill_between(dataset.timeext[i],damlinedown,damlineup, color='gray', alpha=0.5, label='95% CI')
+                        ax[1,i].fill_between(dataset.timeext[i],surlinedown,surlineup, color='gray', alpha=0.5, label='95% CI')
+                        ax2[0].errorbar(dataset.survprobstreat[i],
                                         survmodelprob[i],
-                                        yerr=[survmodelprob[i]-surlinedown[dataset.index_commontime],
-                                              surlineup[dataset.index_commontime]-survmodelprob[i]], fmt='none',
+                                        yerr=[survmodelprob[i]-surlinedown[dataset.index_commontime[i]],
+                                              surlineup[dataset.index_commontime[i]]-survmodelprob[i]], fmt='none',
                                               ecolor='k', zorder = 0)
                 fig2.suptitle("Dataset %d"%(nd+1))
                 fig2.tight_layout()
@@ -238,21 +240,25 @@ def EFSA_quality_criteria(datastruct, concstruct, model):
         modelpars = modelpars[[0,1,2]+[3+nd]]
         for i in range(concset.ntreats):
             nmax = dataset.survarray[i,0]
-            damage = model.calc_damage(modelpars[0],dataset.timeext, concset.time, 
+            damage = model.calc_damage(modelpars[0],dataset.timeext[i], concset.time, 
                                             concset.concarray[i], concset.concslopes[i],
                                             concset.concconst[i])
-            survival = model.calc_survival(dataset.timeext, concset.concarray[i],
+            survival = model.calc_survival(dataset.timeext[i], concset.concarray[i],
                                                 damage, modelpars,
                                                 concset.concconst[i])
-            ssq_fitnum += np.sum((dataset.survarray[i,1:]-nmax*survival[dataset.index_commontime[1:]])**2) 
-            ssq_fitnum0 += np.sum((dataset.survarray[i]-nmax*survival[dataset.index_commontime])**2) 
-            ssq_fit += np.sum((dataset.survprobs[i,1:]-survival[dataset.index_commontime[1:]])**2)
-            ssq_fit0 += np.sum((dataset.survprobs[i]-survival[dataset.index_commontime])**2)
-            sppe[i] = 100 * (dataset.survprobs[i,-1] - survival[dataset.index_commontime[-1]])
-        ssq_tot = np.sum((dataset.survprobs.flatten()-np.mean(dataset.survprobs.flatten()))**2)
-        ssq_tot0 = np.sum((dataset.survprobs[:,1:].flatten()-np.mean(dataset.survprobs[:,1:].flatten()))**2)
-        nrmse   = 100 * np.sqrt(ssq_fitnum/(concset.ntreats*len(dataset.survprobs[0,1:]))) / np.mean(dataset.survarray[:,1:].flatten())
-        nrmse0   = 100 * np.sqrt(ssq_fitnum0/(concset.ntreats*len(dataset.survprobs[0]))) / np.mean(dataset.survarray.flatten())
+            ssq_fitnum += np.sum((dataset.survarrtreat[i][1:]-nmax*survival[dataset.index_commontime[i][1:]])**2) 
+            ssq_fitnum0 += np.sum((dataset.survarrtreat[i]-nmax*survival[dataset.index_commontime[i]])**2) 
+            ssq_fit += np.sum((dataset.survprobstreat[i][1:]-survival[dataset.index_commontime[i][1:]])**2)
+            ssq_fit0 += np.sum((dataset.survprobstreat[i]-survival[dataset.index_commontime[i]])**2)
+            sppe[i] = 100 * (dataset.survprobstreat[i][-1] - survival[dataset.index_commontime[i][-1]])
+        flattensurvprob0  = np.concatenate(dataset.survprobstreat).ravel()
+        flattensurvprob   = np.concatenate([x[1:] for x in dataset.survprobstreat]).ravel()
+        flattensurvarray0 = np.concatenate(dataset.survarrtreat).ravel()
+        flattensurvarray  = np.concatenate([x[1:] for x in dataset.survarrtreat]).ravel()
+        ssq_tot = np.sum((flattensurvprob-np.mean(flattensurvprob))**2)
+        ssq_tot0 = np.sum((flattensurvprob0-np.mean(flattensurvprob0))**2)
+        nrmse   = 100 * np.sqrt(ssq_fitnum/(len(flattensurvprob))) / np.mean(flattensurvarray)
+        nrmse0   = 100 * np.sqrt(ssq_fitnum0/(len(flattensurvprob0))) / np.mean(flattensurvarray0)
         print("-- Dataset %d ---------------------------------"%(nd+1))
         print("R2: %.4f"%(1-ssq_fit/ssq_tot))
         print("NRMSE(%%): %.4f"%nrmse)
@@ -302,33 +308,44 @@ class concclass:
     def __init__(self,concdata,concunits):
         self.concdata = concdata
         self.ntreats = concdata.shape[1] - 1
+        self.timetr = concdata[:,0]
         self.time = concdata[:,0]
-        self.concarray = np.transpose(concdata[:,1:])
-        self.concslopes = np.zeros_like(self.concarray)
+        self.concarraytr = np.transpose(concdata[:,1:])
+        self.concslopestr = np.zeros_like(self.concarraytr)
         self.conctwa = np.zeros(self.ntreats)
         # array to store if a treatment has constant concentration or not
         self.concconst = np.zeros(self.ntreats) 
         self.concmax = np.zeros(self.ntreats)
         self.concunits = concunits
         for i in range(self.ntreats):
-            nans, x = np.isnan(self.concarray[i]), lambda z: z.nonzero()[0]
-            for nan_idx in np.where(nans)[0]:
-                if nan_idx == 0 or nan_idx == len(self.time) - 1:
-                    self.concarray[i][nan_idx] = np.nan
-                else:
-                    prev_idx = nan_idx - 1
-                    next_idx = nan_idx + 1
-                    while next_idx < len(self.time) and np.isnan(self.concarray[i][next_idx]):
-                        next_idx += 1
-                    if next_idx < len(self.time):
-                        self.concarray[i][nan_idx] = np.interp(self.time[nan_idx], [self.time[prev_idx], self.time[next_idx]], [self.concarray[i][prev_idx], self.concarray[i][next_idx]])
+            nans, x = np.isnan(self.concarraytr[i]), lambda z: z.nonzero()[0]
+            if np.sum(~nans) == 1:
+                self.concarraytr[i][nans] = self.concarraytr[i][~nans][0]
+            else:
+                for nan_idx in np.where(nans)[0]:
+                    if nan_idx == 0:
+                        self.concarraytr[i][nan_idx] = np.nan
+                    elif nan_idx == len(self.time) - 1:
+                        self.concarraytr[i][nan_idx] = self.concarraytr[i][nan_idx - 1]
                     else:
-                        self.concarray[i][nan_idx] = np.nan
-            self.concslopes[i,:-1] = np.diff(self.concarray[i])/np.diff(self.time)
-            self.conctwa[i] = np.trapz(self.concarray[i],self.time)/self.time[-1]
-            self.concmax[i] = np.max(self.concarray[i])
-            if (np.all(self.concslopes[i])==0) & (len(np.unique(self.concarray[i]))<2):
+                        prev_idx = nan_idx - 1
+                        next_idx = nan_idx + 1
+                        while next_idx < len(self.time) and np.isnan(self.concarraytr[i][next_idx]):
+                            next_idx += 1
+                        if next_idx < len(self.time):
+                            self.concarraytr[i][nan_idx] = np.interp(self.time[nan_idx], [self.time[prev_idx], self.time[next_idx]], [self.concarraytr[i][prev_idx], self.concarraytr[i][next_idx]])
+                        else:
+                            self.concarraytr[i][nan_idx] = np.nan
+            self.concslopestr[i,:-1] = np.diff(self.concarraytr[i])/np.diff(self.time)
+            self.conctwa[i] = np.trapz(self.concarraytr[i],self.time)/self.time[-1]
+            self.concmax[i] = np.max(self.concarraytr[i])
+            if (np.all(self.concslopestr[i])==0) & (len(np.unique(self.concarraytr[i]))<2):
                 self.concconst[i] = 1
+        self.time = np.unique(self.time)
+        tmpslopes = self.concslopestr[np.isfinite(self.concslopestr)]
+        tmparray = self.concarraytr[np.isfinite(self.concslopestr)]
+        self.concslopes = tmpslopes.reshape((self.ntreats,len(self.time)))
+        self.concarray = tmparray.reshape((self.ntreats,len(self.time)))
 
 class dataclass:
     def __init__(self,survdata):
@@ -340,21 +357,47 @@ class dataclass:
         self.survprobs = np.zeros((self.ntreats,len(self.time)))
         self.lowlim = np.zeros((self.ntreats,len(self.time)))
         self.upplim = np.zeros((self.ntreats,len(self.time)))
+        # this is needed to handle possibility of missing data in the
+        # survival matrix
+        self.timetreat = []
+        self.survarrtreat = []
+        self.deatharraytreat = []
+        self.survprobstreat = []
+        self.lowlimtreat = []
+        self.upplimtreat = []
         z= 1.96
         for i in range(self.ntreats):
-            self.deatharray[i,:len(self.time)-1] = np.array(-np.diff(survdata[:,i+1]))
-            self.deatharray[i,-1] = survdata[-1,i+1]
-            ninit = survdata[0,i+1]
+            tmpsurv = self.survarray[i, np.isnan(self.survarray[i])==False]
+            tmptime = self.time[np.isnan(self.survarray[i])==False]
+            self.survarrtreat.append(tmpsurv)
+            self.timetreat.append(tmptime)
+            self.deatharraytreat.append(np.append( -np.diff(tmpsurv[:]), tmpsurv[-1]) )
+            ninit = survdata[0,i+1] # time 0 in principle should never have a nan value
+            tmpprob = tmpsurv/ninit
+            self.survprobstreat.append(tmpprob)
             # Wilson score interval on data probabilities.
             # https://en.wikipedia.org/wiki/Binomial_proportion_confidence_interval#Wilson_score_interval
-            survprop = survdata[:,i+1]/ninit
-            self.survprobs[i,:] = survprop
-            a = (survprop + z**2/(2*ninit))/(1+z**2/ninit)
-            b = z/(1+z**2/ninit) * np.sqrt(survprop*(1-survprop)/ninit + z**2/(4*ninit**2))
+            a = (tmpprob + z**2/(2*ninit))/(1+z**2/ninit)
+            b = z/(1+z**2/ninit) * np.sqrt(tmpprob*(1-tmpprob)/ninit + z**2/(4*ninit**2))
             a[0]=1
             b[0]=0
-            self.lowlim[i,:] = np.maximum(0,a-b)
-            self.upplim[i,:] = np.minimum(1,a+b)
+            tmplowlim = np.maximum(0,a-b)
+            tmpupplim = np.minimum(1,a+b)
+            self.lowlimtreat.append(tmplowlim)
+            self.upplimtreat.append(tmpupplim)
+            # self.deatharray[i,:len(self.time)-1] = np.array(-np.diff(survdata[:,i+1]))
+            # self.deatharray[i,-1] = survdata[-1,i+1]
+            # ninit = survdata[0,i+1]
+            # # Wilson score interval on data probabilities.
+            # # https://en.wikipedia.org/wiki/Binomial_proportion_confidence_interval#Wilson_score_interval
+            # survprop = survdata[:,i+1]/ninit
+            # self.survprobs[i,:] = survprop
+            # a = (survprop + z**2/(2*ninit))/(1+z**2/ninit)
+            # b = z/(1+z**2/ninit) * np.sqrt(survprop*(1-survprop)/ninit + z**2/(4*ninit**2))
+            # a[0]=1
+            # b[0]=0
+            # self.lowlim[i,:] = np.maximum(0,a-b)
+            # self.upplim[i,:] = np.minimum(1,a+b)
             
 # this class inherits from PyParspace and extends the functionalities
 class pyGUTSred(parspace.PyParspace):

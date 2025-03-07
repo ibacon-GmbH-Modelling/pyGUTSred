@@ -34,5 +34,26 @@ if __name__ == '__main__':
     # datastr[0].timeext = SDfit2.model.calc_ext_time(datastr[0])[0]
     # datastr[0].index_commontime = SDfit2.model.calc_ext_time(datastr[0])[1]
     # SDfit = pg.pyGUTSred(["datasets/fluorophenyl_minnows.txt"], "SD", hbfree=True)
-    ITfit = pg.pyGUTSred(["datasets/setsfromopenguts/diazinon_gammarus.txt"], "IT", hbfree=True)
+    # ITfit = pg.pyGUTSred(["datasets/setsfromopenguts/diazinon_gammarus.txt"], "IT", hbfree=True)
     # ITfit.run_and_time_parspace()
+
+    # SDfit = pg.pyGUTSred(["datasets/setsfromopenguts/dieldrin_guppy.txt"], "SD", hbfree=True)
+    # SDfit.run_and_time_parspace()
+    # ITfit = pg.pyGUTSred(["datasets/setsfromopenguts/dieldrin_guppy.txt"], "IT", hbfree=True)
+    # ITfit.run_and_time_parspace()
+
+    # SDfit = pg.pyGUTSred(["datasets/setsfromopenguts/fluorophenyl_minnows.txt"], "SD", hbfree=True)
+    # SDfit.run_and_time_parspace()
+    # ITfit = pg.pyGUTSred(["datasets/setsfromopenguts/fluorophenyl_minnows.txt"], "IT", hbfree=True)
+    # ITfit.run_and_time_parspace()
+
+    # SDfit = pg.pyGUTSred(["datasets/setsfromopenguts/methomyl_minnows.txt"], "SD", hbfree=True)
+    # SDfit.run_and_time_parspace()
+    # ITfit = pg.pyGUTSred(["datasets/setsfromopenguts/methomyl_minnows.txt"], "IT", hbfree=True)
+    # ITfit.run_and_time_parspace()
+
+    # SDfit = pg.pyGUTSred(["datasets/setsfromopenguts/propiconazole_weird.txt"], "SD", hbfree=True)
+    # SDfit.run_and_time_parspace()
+    # ITfit = pg.pyGUTSred(["datasets/setsfromopenguts/propiconazole_weird.txt"], "IT", hbfree=True)
+    # ITfit.run_and_time_parspace()
+    pass
