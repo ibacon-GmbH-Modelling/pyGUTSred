@@ -187,7 +187,7 @@ class GUTSmodels:
                                           self.concstruct[nd].concconst[i])
                 surviv = self.calc_survival(self.timeext[nd][i], self.concstruct[nd].concarray[i],
                                             damage, modelpars_nd,
-                                            self.concstruct[nd].concconst[i])             
+                                            self.concstruct[nd].concconst[i])         
                 llik += loglikelihood(surviv,self.index_commontime[nd][i],
                                       self.datastruct[nd].deatharraytreat[i])
                 i+=1

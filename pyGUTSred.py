@@ -43,6 +43,16 @@ def readfile(filepath):
     #self.datastruct=dataclass(np.array(survdata))
     return((concclass(np.array(concdata),concunits), dataclass(np.array(survdata))))
 
+def readprofile(filepath, units=''):
+    # this function assumes that the file is
+    # simply 2 columns, one with the time
+    # and the other with the concentration
+    # the user can provide optionally the
+    # units
+    table = pd.read_csv(filepath,  sep='\s+', header =None)
+    table = table.apply(pd.to_numeric, errors='coerce')
+    return(concclass(np.array(table), units))
+
 def lcx_calculation(model, timepoints=[2,4,10,21], levels=[0.1,0.2,0.5], propagationset=None, plot=False, concunits=""):
     # the calculation of LCx values assumes always that the 
     # exposure is constant
@@ -347,6 +357,25 @@ class concclass:
         self.concslopes = tmpslopes.reshape((self.ntreats,len(self.time)))
         self.concarray = tmparray.reshape((self.ntreats,len(self.time)))
 
+    def plot_exposure(self):
+        fig = plt.figure()
+        ax = fig.subplots(1,self.ntreats)
+        cmax = np.max(self.concmax)
+        if self.ntreats==1:
+            ax.fill_between(self.timetr,self.concarraytr[0], label='Concentration', color='blue', alpha=0.2)
+            ax.set_ylim([0, cmax*1.1])
+            ax.set_ylabel("Concentration [%s]"%self.concunits)
+            ax.set_xlabel("Time [d]")
+        else:
+            for i in range(self.ntreats):
+                ax[i].fill_between(self.timetr,self.concarraytr[i], label='Concentration', color='blue', alpha=0.2)
+                ax[i].set_ylim([0, cmax*1.1])
+                ax[i].set_xlabel("Time [d]")
+            ax[0].set_ylabel("Concentration [%s]"%self.concunits)
+        plt.tight_layout()
+        plt.show()
+
+
 class dataclass:
     def __init__(self,survdata):
         self.survdata = survdata
@@ -371,7 +400,7 @@ class dataclass:
             tmptime = self.time[np.isnan(self.survarray[i])==False]
             self.survarrtreat.append(tmpsurv)
             self.timetreat.append(tmptime)
-            self.deatharraytreat.append(np.append( -np.diff(tmpsurv[:]), tmpsurv[-1]) )
+            self.deatharraytreat.append(np.append( -(np.diff(tmpsurv[:]).astype('float')), tmpsurv[-1]) )
             ninit = survdata[0,i+1] # time 0 in principle should never have a nan value
             tmpprob = tmpsurv/ninit
             self.survprobstreat.append(tmpprob)
