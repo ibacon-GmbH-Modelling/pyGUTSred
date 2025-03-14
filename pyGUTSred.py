@@ -7,6 +7,7 @@ import parspace
 import matplotlib.pyplot as plt
 
 from copy import deepcopy
+import multiprocessing as mp
 
 def readfile(filepath):
     with open(filepath, 'r') as f:
@@ -49,6 +50,8 @@ def readprofile(filepath, units=''):
     # and the other with the concentration
     # the user can provide optionally the
     # units
+    # TODO: make sure that the profile has the same units as the
+    #       model calibration
     table = pd.read_csv(filepath,  sep='\s+', header =None)
     table = table.apply(pd.to_numeric, errors='coerce')
     return(concclass(np.array(table), units))
@@ -61,14 +64,22 @@ def lcx_calculation(model, timepoints=[2,4,10,21], levels=[0.1,0.2,0.5], propaga
 
     modelpars = np.copy(10**model.parvals*model.islog + model.parvals*(1-model.islog))
     modelpars[-model.ndatasets:] = 0 # for the LCx values, bkg mortality is 0
-
+    print(modelpars)
     LCx = np.zeros((len(timepoints),len(levels)))
     LCxlo = np.zeros((len(timepoints),len(levels)))
     LCxup = np.zeros((len(timepoints),len(levels)))
     if (propagationset is not None):
-        par95 = 10**propagationset*model.islog + propagationset*(1-model.islog)
+        #pars95[model.posfree] = propagationset[j]
+        par95 = np.copy(model.parvals)
+        par95 = np.expand_dims(par95, axis = 0)
+        par95 = np.repeat(par95, len(propagationset), axis=0)
+        par95[:,model.posfree] = propagationset
+        par95 = 10**par95*model.islog + par95*(1-model.islog)
         par95[:,-model.ndatasets:] = 0 # remove the background mortality
         par95 = par95[:,:4]
+        # par95 = 10**propagationset*model.islog + propagationset*(1-model.islog)
+        # par95[:,-model.ndatasets:] = 0 # remove the background mortality
+        # par95 = par95[:,:4]
     for i in range(len(timepoints)):
         timevectors = np.linspace(0,timepoints[i],model.nbinsperday)
         for j in range(len(levels)):
@@ -92,7 +103,8 @@ def lcx_calculation(model, timepoints=[2,4,10,21], levels=[0.1,0.2,0.5], propaga
                 crit = 1
                 while crit>0:
                     conclims[1] = conclims[1] * 10 # shift lower and upper range by factor of 10
-                    crit   = survfrac(conclims[1],timevectors,modelpars,levels[j]) - (1-levels[j]) # calculate criterion from upper range  
+                    #crit   = survfrac(conclims[1],timevectors,modelpars,levels[j]) - (1-levels[j]) # calculate criterion from upper range  
+                    crit   = survfrac(conclims[1],timevectors,modelpars,levels[j]) # calculate criterion from upper range  
                 LCx[i,j] = sp.optimize.brenth(survfrac,conclims[0],conclims[1],args=(timevectors,modelpars,levels[j]))
                 if (propagationset is not None):
                     for k in par95:
@@ -100,7 +112,8 @@ def lcx_calculation(model, timepoints=[2,4,10,21], levels=[0.1,0.2,0.5], propaga
                         crit = 1
                         while crit>0:
                             conclims[1] = conclims[1] * 10
-                            crit   = survfrac(conclims[1],timevectors,k,levels[j]) - (1-levels[j]) # calculate criterion from upper range
+                            #crit   = survfrac(conclims[1],timevectors,k,levels[j]) - (1-levels[j]) # calculate criterion from upper range
+                            crit   = survfrac(conclims[1],timevectors,k,levels[j]) # calculate criterion from upper range
                         lcx = sp.optimize.brenth(survfrac,conclims[0],conclims[1],args=(timevectors,k,levels[j]))
                         if lcx <= lcxmin:
                             lcxmin = lcx
@@ -124,7 +137,7 @@ def lcx_calculation(model, timepoints=[2,4,10,21], levels=[0.1,0.2,0.5], propaga
     print("LCx values:")
     titlestring = "{:<10}".format("Time [d]")
     for i in range(len(levels)):
-        titlestring = titlestring + "LD{:<32}".format(round(levels[i]*100))
+        titlestring = titlestring + "LC{:<32}".format(round(levels[i]*100))
     print(titlestring)
     for i in range(len(timepoints)):
         values = "{:<10d}".format(timepoints[i])
@@ -314,6 +327,232 @@ def validate(validationfile, fitmodel, propagationset, hbfix = True):
             par95 = np.hstack((propagationset[:,model.posfree<3], fillhb))
             plot_data_model(fit=2,datastruct=valdata,concstruct=valconc,model=model,propagationset=par95)
 
+def _find_mfrange(timevec, damage, survtest, parsset):
+    # auxiliary function to calculate the range of multiplication
+    # factors
+    Send1 = models.calc_surv_sd_trapz(timevec, damage, parsset[1:])[-1]
+    MFlow = 1
+    MFhigh = 1
+    Send = Send1
+    while (Send > survtest):
+        MFhigh = MFhigh * 10.
+        Send = models.calc_surv_sd_trapz(timevec, MFhigh*damage, parsset[1:])[-1]
+    Send = Send1
+    while (Send < survtest):
+        MFlow = MFlow / 10.
+        Send = models.calc_surv_sd_trapz(timevec, MFlow*damage, parsset[1:])[-1]
+    return((MFlow, MFhigh))
+
+def _calculate_damage(args):
+    par95_k, tlong, profile_time, profile_concarray, profile_concslopes = args
+    return models.damage_linear_calc(par95_k, tlong, profile_time, profile_concarray, profile_concslopes)
+
+def lpx_calculation(profile, fitmodel, propagationset = None, lpxvals = [0.1,0.5], srange = [0.05, 0.999], len_srange = 50, plot = True):
+    def survfrac(MF, tvals, Dvals, pars, level):
+        return(models.calc_surv_sd_trapz(tvals, MF*Dvals,pars)[-1] - (1-level))
+    # impose 0 background mortality
+    model = deepcopy(fitmodel)
+    model.parvals = model.parvals[:4]
+    model.islog = model.islog[:4]
+    model.islog[-1] = 0 
+    model.parbound_lower = model.parbound_lower[:4]
+    model.parbound_upper = model.parbound_upper[:4]
+    model.parvals[-1] = 0
+    modelpars = np.copy(10**model.parvals*model.islog + model.parvals*(1-model.islog))
+    print("Fixing background mortality to 0")
+    tlong = np.linspace(profile.time[0], profile.time[-1],int(profile.time[-1] * model.nbinsperday+1))
+    tlong = np.append(profile.time,tlong)  # to make sure we are not skipping datapoints            
+    tlong = np.unique(tlong)
+    # create variables to store the results
+    srangevec = np.linspace(srange[1],srange[0],len_srange)
+    # these are needed in the IT case
+    LPxpl = np.zeros(len_srange)
+    LPxpllo = np.zeros(len_srange)
+    LPxplup = np.zeros(len_srange)
+    # these are needed in the SD case
+    Survpl = np.zeros(len_srange)
+    Survpllo = np.zeros(len_srange)
+    Survplup = np.zeros(len_srange)
+    LPx = np.zeros((len(lpxvals),3)) # len(lpxvals) rows and 3 columns (val, lowlim, uplim)
+    survlpx = np.zeros((len(lpxvals),len(tlong)))
+    damplpx = np.zeros((len(lpxvals),len(tlong)))
+    # here we operate under the assumption that there is only one treatment in the profile.
+    # so the array indices are set 0, not to change the concstruct class
+    # calculating damage without any multiplication factor
+    # calculations for MF = 1
+    damage1 = model.calc_damage(modelpars[0],tlong, profile.time, 
+                                profile.concarray[0], profile.concslopes[0],
+                                profile.concconst[0])
+    survival1 = model.calc_survival(tlong, profile.concarray[0],
+                                    damage1, modelpars,
+                                    profile.concconst[0])
+    if propagationset is not None:
+        par95 = np.copy(model.parvals)
+        par95 = np.expand_dims(par95, axis = 0)
+        par95 = np.repeat(par95, len(propagationset), axis=0)
+        par95[:,model.posfree] = propagationset
+        par95 = 10**par95*model.islog + par95*(1-model.islog)
+        par95[:,-model.ndatasets:] = 0 # remove the background mortality
+        par95 = par95[:,:4] # keep only 4 parameters
+        Mdamk = np.zeros(len(propagationset))
+        betak = np.log(39)/np.log(par95[:,1])
+        damk = np.zeros((len(propagationset),len(tlong)))
+    if model.variant == "IT":
+        maxDw = max(damage1)
+        beta = np.log(39)/np.log(modelpars[1])
+        for i in range(len_srange):
+            Feff = 1-srangevec[i]
+            LPxpl[i] = (modelpars[2]/maxDw) * (Feff/(1-Feff))**(1/beta)
+            if propagationset is not None:
+                lpxmin = np.inf
+                lpxmax = 0
+                for k in range(len(par95)):
+                    damk = model.calc_damage(par95[k][0],tlong, profile.time, 
+                                profile.concarray[0], profile.concslopes[0],
+                                profile.concconst[0])
+                    Mdamk[k] = max(damk)
+                    lpx = (par95[k][2]/Mdamk[k]) * (Feff/(1-Feff))**(1/betak[k])
+                    if lpx <= lpxmin:
+                        lpxmin = lpx
+                    if lpx >= lpxmax:
+                        lpxmax = lpx
+                LPxpllo[i] = lpxmin
+                LPxplup[i] = lpxmax
+        for i in range(len(lpxvals)):
+            Feff = lpxvals[i]
+            LPx[i,0] = (modelpars[2]/maxDw) * (Feff/(1-Feff))**(1/beta)
+            if propagationset is not None:
+                lpxmin = np.inf
+                lpxmax = 0
+                for k in range(len(par95)):
+                    lpx = (par95[k][2]/Mdamk[k]) * (Feff/(1-Feff))**(1/betak[k])
+                    if lpx <= lpxmin:
+                        lpxmin = lpx
+                    if lpx >= lpxmax:
+                        lpxmax = lpx
+                LPx[i,1] = lpxmin
+                LPx[i,2] = lpxmax
+    else: # SD variant, no need to specify
+        # precalculate the damage
+        with mp.Pool() as pool:
+            damk = pool.map(_calculate_damage, [(par95[k][0], tlong, profile.time, profile.concarray[0], profile.concslopes[0]) for k in range(len(par95))])
+        damk = np.array(damk)
+        # this part is taken from the openGUTS implementation but,
+        # # maybe it could be simplified with the use of auxiliary function
+        # mf_try = 1
+        # Send = survival1[-1]
+        # coll_rough = [np.array([mf_try,Send])]
+        # while Send > srange[0]:
+        #     mf_try = mf_try *10
+        #     Send = model.calc_survival(tlong, None,
+        #                                   mf_try * damage1, modelpars,
+        #                                   profile.concconst[0])[-1]
+        #     coll_rough.append(np.array([mf_try, Send]))
+        # Send = survival1[-1]
+        # mf_try = 1
+        # while Send < srange[1]:
+        #     mf_try = mf_try /10
+        #     Send = model.calc_survival(tlong, None,
+        #                                   mf_try * damage1, modelpars,
+        #                                   profile.concconst[0])[-1]
+        #     coll_rough.append(np.array([mf_try, Send])) # in openguts the append is done on top
+        # coll_rough = np.array(coll_rough)    # transform in numpy array to ease operations
+        # sortind = np.argsort(coll_rough[:,0])
+        # coll_rough = coll_rough[sortind]
+        # ind_hi = np.argwhere(coll_rough[:,1]<srange[0]).flatten().min()
+        # ind_lo = np.argwhere(coll_rough[:,1]>srange[0]).flatten().max()
+        # mfrange = coll_rough[ind_lo:ind_hi+1,0]
+        # rootsmall = sp.optimize.brenth(survfrac,mfrange[0],mfrange[-1],args=(tlong, damage1, modelpars[1:], 1-srange[0]))
+        # ind_hi = np.argwhere(coll_rough[:,1]<srange[1]).flatten().min()
+        # ind_lo = np.argwhere(coll_rough[:,1]>srange[1]).flatten().max()
+        # rootlarge = sp.optimize.brenth(survfrac,mfrange[0],mfrange[-1],args=(tlong, damage1, modelpars[1:], 1-srange[1]))
+        # implementation with auxiliary function
+        mf1, mf2 = _find_mfrange(tlong, damage1, srange[0], modelpars)
+        rootsmall = sp.optimize.brenth(survfrac,mf1,mf2,args=(tlong, damage1, modelpars[1:], 1-srange[0]))
+        mf1, mf2 = _find_mfrange(tlong, damage1, srange[1], modelpars)
+        rootlarge = sp.optimize.brenth(survfrac,mf1, mf2,args=(tlong, damage1, modelpars[1:], 1-srange[1]))
+
+        # mfvec = np.logspace(np.log10(rootlarge),np.log10(rootsmall), len_srange)
+        mfvec = np.logspace(np.log10(rootlarge*0.8),np.log10(rootsmall*1.2), len_srange) # extend a little the range in case the drop in survival is too sharp
+
+        print('start calculating S vs MF')
+        for i in range(len_srange):
+            Survpl[i] = models.calc_surv_sd_trapz(tlong, mfvec[i]*damage1, modelpars[1:])[-1]
+            if propagationset is not None:
+                survmin = 1.
+                survmax = 0.
+                for k in range(len(par95)):
+                    surv = models.calc_surv_sd_trapz(tlong, mfvec[i]*damk[k,:], par95[k][1:])[-1]
+                    if surv<=survmin:
+                        survmin = surv
+                    if surv>=survmax:
+                        survmax = surv
+                Survpllo[i] = survmin
+                Survplup[i] = survmax
+        print('done calculating S vs MF')
+        for j in range(len(lpxvals)):
+            ind_lo = np.argwhere(Survpl < (1-lpxvals[j])).flatten().max()
+            ind_hi = np.argwhere(Survpl > (1-lpxvals[j])).flatten().min()
+            LPx[j,0] = sp.optimize.brenth(survfrac,mfvec[ind_lo],mfvec[ind_hi],args=(tlong, damage1, modelpars[1:], lpxvals[j]))
+            if propagationset is not None:
+                lpxmin = np.inf
+                lpxmax = 0
+                for k in range(len(par95)):
+                    mflow,mfhigh = _find_mfrange(tlong, damk[k,:], 1-lpxvals[j], par95[k])                
+                    lpxk = sp.optimize.brenth(survfrac,mflow,mfhigh,args=(tlong, damk[k,:], par95[k][1:], lpxvals[j]))
+                    if lpxk<=lpxmin:
+                        lpxmin = lpxk
+                    if lpxk>=lpxmax:
+                        lpxmax = lpxk
+                LPx[j,1] = lpxmin
+                LPx[j,2] = lpxmax
+    # printing the results
+    print("----------------------------------------------------------------")
+    print("LPx values:")
+    for j in range(len(lpxvals)):
+        values = "LP{:<3}:  {:<7.3g} ({:<7.3g} - {:<7.3g})       ".format(round(lpxvals[j]*100),LPx[j,0], LPx[j,1], LPx[j,2])
+        print(values)
+    if plot:
+        fig=plt.figure()
+        ax = fig.subplots(1,1)
+        if model.variant == 'IT':
+            plt.plot(LPxpl,srangevec,'k-')
+            plt.fill_betweenx(srangevec, LPxpllo, LPxplup, alpha=0.2)
+        else:
+            plt.plot(mfvec,Survpl,'k-')
+            plt.fill_between(mfvec, Survpllo, Survplup, alpha=0.2)
+        plt.hlines(1-np.array(lpxvals), xmin=ax.get_xlim()[0],xmax=ax.get_xlim()[1],
+                   colors='grey', linestyles='--', linewidth=0.5)
+        plt.xlabel("Multiplication factor")
+        plt.ylabel("Survival probability")
+        # Add new plot with profile, profile multiplied, damage, and surv. prop.
+        fig2 = plt.figure()
+        ax2 = fig2.subplots(2,len(lpxvals)+1) # +1 becuase I am also plotting MF=1
+        ax2[0,0].fill_between(profile.timetr, profile.concarraytr[0], label = "Conc",color='blue', alpha=0.2)
+        ax2[0,0].plot(tlong, damage1, 'k--')
+        ax2[0,0].set_ylim([0,max(profile.concarraytr[0])*max(LPx[:,0])*1.1])
+        ax2[0,0].set_title("MF = 1")
+        ax2[1,0].plot(tlong, survival1,'k-')
+        ax2[1,0].set_ylim([0,1.1])
+        ax2[0,0].set_ylabel("Concentration ["+profile.concunits+"]")
+        ax2[1,0].set_ylabel("Survival probability")
+        ax2[1,0].set_xlabel("Time [d]")
+        for i in range(len(lpxvals)):
+            ax2[0,i+1].set_ylim([0,max(profile.concarraytr[0])*max(LPx[:,0])*1.1])
+            ax2[0,i+1].fill_between(profile.timetr, LPx[i,0]*profile.concarraytr[0], label = "Conc",color='blue', alpha=0.2)
+            ax2[0,i+1].plot(tlong, LPx[i,0]*damage1, 'k--')
+            ax2[0,i+1].set_title("MF = %.2f"%LPx[i,0])
+            surv = models.calc_surv_sd_trapz(tlong, LPx[i,0]*damage1, modelpars[1:])
+            ax2[1,i+1].plot(tlong, surv, 'k-')
+            ax2[1,i+1].set_ylim([0,1.1])
+            ax2[1,i+1].set_xlabel("Time [d]")
+        plt.tight_layout()
+    if len(lpxvals)==1:
+        return(LPx.flatten())
+    else:
+        return(LPx)
+
+
 class concclass:
     def __init__(self,concdata,concunits):
         self.concdata = concdata
@@ -474,7 +713,7 @@ class pyGUTSred(parspace.PyParspace):
             self._preset_pars()
         else:
             # in this case the user needs to insert the values
-            self.parvalues = parvalues
+            self.parvals = parvalues
             self.lbound = lbound
             self.ubound = ubound
             self.islog = islog
@@ -485,14 +724,14 @@ class pyGUTSred(parspace.PyParspace):
             print("fit hb to control data")
             self.fit_hb()    
         self.model = models.GUTSmodels(self.datastruct,self.concstruct,self.variant,
-                                       self.parnames,self.parvalues,self.islog,self.isfree,
+                                       self.parnames,self.parvals,self.islog,self.isfree,
                                        self.lbound,self.ubound)
         # make sure that the time vectors will belong to the data structure as well
         for i in range(self.ndatasets):
             self.datastruct[i].timeext = self.model.timeext[i]
             self.datastruct[i].index_commontime = self.model.index_commontime[i]
         print("precompile the functions")
-        self.model.log_likelihood(self.parvalues[self.model.posfree],self.parvalues,self.model.posfree)
+        self.model.log_likelihood(self.parvals[self.model.posfree],self.parvals,self.model.posfree)
         print("setup the parameter space explorer")
         self.parspacesetup = parspace.SettingParspace(rough=rough,profile=profile)
         super().__init__(self.parspacesetup,self.model)
@@ -545,7 +784,7 @@ class pyGUTSred(parspace.PyParspace):
         
         self.lbound = np.log10(self.lbound)*self.islog+self.lbound*(1-self.islog)
         self.ubound = np.log10(self.ubound)*self.islog+self.ubound*(1-self.islog)    
-        self.parvalues = (self.lbound+self.ubound)/2
+        self.parvals = (self.lbound+self.ubound)/2
         #self.parvalues = np.log10(self.parvalues)*self.islog+self.parvalues*(1-self.islog)
         print("Parameter settings:")
         print("parnames: ",self.parnames)
@@ -558,12 +797,12 @@ class pyGUTSred(parspace.PyParspace):
     def fit_hb(self):
         for i in range(self.ndatasets):
             res = sp.optimize.minimize(models.hb_fit_ll, 
-                                   x0=self.parvalues[2+(i+1)], 
+                                   x0=self.parvals[2+(i+1)], 
                                    args=(self.datastruct[i].time,self.datastruct[i].deatharray[0]),
                                    method='Nelder-Mead',
                                    bounds=[(self.lbound[2+(i+1)], self.ubound[2+(i+1)])])
-            self.parvalues[2+(i+1)] = res.x
-            print("hb fitted to control data for dataset %d: %.4f"%(i+1,self.parvalues[2+(i+1)]))
+            self.parvals[2+(i+1)] = res.x
+            print("hb fitted to control data for dataset %d: %.4f"%(i+1,self.parvals[2+(i+1)]))
 
     def run_and_time_parspace(self):
         # wrapper around the parameter space explorer so that
@@ -574,6 +813,7 @@ class pyGUTSred(parspace.PyParspace):
             print("slow kinetic was detected")
             print("threshold parameter will be explored in logarithmic scale")
             self.model.islog[2] = 1
+            self.islog[2] = 1 # 
             self.parlabels[2] = "log10(%s)"%self.parlabels[2]
             # update boundary for threshold
             # self.model.parbound_upper[2] = min(np.log10(self.model.parbound_upper[2]),np.log10(out[2][self.model.posfree==2]*self.opts.slowkin_f_mw))
@@ -592,8 +832,8 @@ class pyGUTSred(parspace.PyParspace):
     def EFSA_quality_criteria(self):
         EFSA_quality_criteria(self.datastruct, self.concstruct, self.model)
 
-    def lcx_calculation(self, timepoints=[2,4,10,21],levels=[0.1,0.2,0.5], plot=False):
-        lcx_calculation(self.model, timepoints=timepoints, levels=levels, propagationset=self.propagationset, plot=plot, concunits=self.concunits)
+    def lcx_calculation(self, timepoints=[2,4,10,21],levels=[0.1,0.2,0.5], plot=False, propagationset=None):
+        lcx_calculation(self.model, timepoints=timepoints, levels=levels, propagationset=propagationset, plot=plot, concunits=self.concunits)
 
     def lpx_calculation(self):
         pass
