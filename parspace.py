@@ -121,6 +121,9 @@ import multiprocessing as mp  # not used here, might become useful for more comp
 from functools import partial
 import scipy.optimize as optim
 
+import psutil
+n_cores = psutil.cpu_count(logical=False) # to have the number of physical cores only
+
 from copy import deepcopy
 
 class SettingParspace:
@@ -978,7 +981,7 @@ class PyParspace:
             #     parprofile.append(self._parameter_profile_sub(i))
 
             # TODO: fix the parallel implementation. As it is, does not work
-            with mp.Pool(mp.cpu_count()) as pool:
+            with mp.Pool(n_cores) as pool:
                 results = pool.starmap(parameter_profile_sub_wrapper, [(i, self) for i in range(self.npars)])
                 parprofile, pbest, coll_ok = zip(*results)
             # for i in range(self.npars):
@@ -1065,7 +1068,7 @@ class PyParspace:
                         parprofile = list() # overwrite the profile
                         # for i in range(self.npars):
                         #     parprofile.append(self._parameter_profile_sub(i))
-                        with mp.Pool(mp.cpu_count()) as pool:
+                        with mp.Pool(n_cores) as pool:
                             results = pool.starmap(parameter_profile_sub_wrapper, [(i, self) for i in range(self.npars)])
                             parprofile, pbest, coll_ok = zip(*results)
                         self.pbest = pbest[np.argmin([p[-1] for p in pbest])]

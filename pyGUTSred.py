@@ -9,6 +9,10 @@ import matplotlib.pyplot as plt
 from copy import deepcopy
 import multiprocessing as mp
 
+# return the number of available physical cores
+import psutil
+n_cores = psutil.cpu_count(logical=False)
+
 def readfile(filepath):
     with open(filepath, 'r') as f:
         lines = f.readlines()
@@ -40,8 +44,6 @@ def readfile(filepath):
     
     survdata = survdata.apply(pd.to_numeric, errors='coerce')
     concdata = concdata.apply(pd.to_numeric, errors='coerce')
-    #self.concstruct=concclass(np.array(concdata))
-    #self.datastruct=dataclass(np.array(survdata))
     return((concclass(np.array(concdata),concunits), dataclass(np.array(survdata))))
 
 def readprofile(filepath, units=''):
@@ -64,7 +66,7 @@ def lcx_calculation(model, timepoints=[2,4,10,21], levels=[0.1,0.2,0.5], propaga
 
     modelpars = np.copy(10**model.parvals*model.islog + model.parvals*(1-model.islog))
     modelpars[-model.ndatasets:] = 0 # for the LCx values, bkg mortality is 0
-    print(modelpars)
+    # print(modelpars)
     LCx = np.zeros((len(timepoints),len(levels)))
     LCxlo = np.zeros((len(timepoints),len(levels)))
     LCxup = np.zeros((len(timepoints),len(levels)))
@@ -351,6 +353,8 @@ def lpx_calculation(profile, fitmodel, propagationset = None, lpxvals = [0.1,0.5
     def survfrac(MF, tvals, Dvals, pars, level):
         return(models.calc_surv_sd_trapz(tvals, MF*Dvals,pars)[-1] - (1-level))
     # impose 0 background mortality
+    print("Calculation of LPx values.")
+    print("Fixing background mortality to 0.")
     model = deepcopy(fitmodel)
     model.parvals = model.parvals[:4]
     model.islog = model.islog[:4]
@@ -359,10 +363,11 @@ def lpx_calculation(profile, fitmodel, propagationset = None, lpxvals = [0.1,0.5
     model.parbound_upper = model.parbound_upper[:4]
     model.parvals[-1] = 0
     modelpars = np.copy(10**model.parvals*model.islog + model.parvals*(1-model.islog))
-    print("Fixing background mortality to 0")
+
     tlong = np.linspace(profile.time[0], profile.time[-1],int(profile.time[-1] * model.nbinsperday+1))
     tlong = np.append(profile.time,tlong)  # to make sure we are not skipping datapoints            
     tlong = np.unique(tlong)
+    
     # create variables to store the results
     srangevec = np.linspace(srange[1],srange[0],len_srange)
     # these are needed in the IT case
@@ -374,8 +379,6 @@ def lpx_calculation(profile, fitmodel, propagationset = None, lpxvals = [0.1,0.5
     Survpllo = np.zeros(len_srange)
     Survplup = np.zeros(len_srange)
     LPx = np.zeros((len(lpxvals),3)) # len(lpxvals) rows and 3 columns (val, lowlim, uplim)
-    survlpx = np.zeros((len(lpxvals),len(tlong)))
-    damplpx = np.zeros((len(lpxvals),len(tlong)))
     # here we operate under the assumption that there is only one treatment in the profile.
     # so the array indices are set 0, not to change the concstruct class
     # calculating damage without any multiplication factor
@@ -396,7 +399,14 @@ def lpx_calculation(profile, fitmodel, propagationset = None, lpxvals = [0.1,0.5
         par95 = par95[:,:4] # keep only 4 parameters
         Mdamk = np.zeros(len(propagationset))
         betak = np.log(39)/np.log(par95[:,1])
-        damk = np.zeros((len(propagationset),len(tlong)))
+        damk = np.zeros((len(propagationset),len(tlong))) # to store precomuped damage
+        survk= np.zeros((len(propagationset),len(tlong))) # temp vector for survival
+        print("Precomputing damage vector for all the propagation sets.")
+        print("Depending on how finely sampled the profile is, this could take a while.")
+        with mp.Pool(n_cores) as pool:
+            damk = pool.map(_calculate_damage, [(par95[k][0], tlong, profile.time, profile.concarray[0], profile.concslopes[0]) for k in range(len(par95))])
+        damk = np.array(damk)
+        Mdamk = np.max(damk, axis=1)
     if model.variant == "IT":
         maxDw = max(damage1)
         beta = np.log(39)/np.log(modelpars[1])
@@ -407,10 +417,6 @@ def lpx_calculation(profile, fitmodel, propagationset = None, lpxvals = [0.1,0.5
                 lpxmin = np.inf
                 lpxmax = 0
                 for k in range(len(par95)):
-                    damk = model.calc_damage(par95[k][0],tlong, profile.time, 
-                                profile.concarray[0], profile.concslopes[0],
-                                profile.concconst[0])
-                    Mdamk[k] = max(damk)
                     lpx = (par95[k][2]/Mdamk[k]) * (Feff/(1-Feff))**(1/betak[k])
                     if lpx <= lpxmin:
                         lpxmin = lpx
@@ -432,50 +438,15 @@ def lpx_calculation(profile, fitmodel, propagationset = None, lpxvals = [0.1,0.5
                         lpxmax = lpx
                 LPx[i,1] = lpxmin
                 LPx[i,2] = lpxmax
-    else: # SD variant, no need to specify
-        # precalculate the damage
-        with mp.Pool() as pool:
-            damk = pool.map(_calculate_damage, [(par95[k][0], tlong, profile.time, profile.concarray[0], profile.concslopes[0]) for k in range(len(par95))])
-        damk = np.array(damk)
-        # this part is taken from the openGUTS implementation but,
-        # # maybe it could be simplified with the use of auxiliary function
-        # mf_try = 1
-        # Send = survival1[-1]
-        # coll_rough = [np.array([mf_try,Send])]
-        # while Send > srange[0]:
-        #     mf_try = mf_try *10
-        #     Send = model.calc_survival(tlong, None,
-        #                                   mf_try * damage1, modelpars,
-        #                                   profile.concconst[0])[-1]
-        #     coll_rough.append(np.array([mf_try, Send]))
-        # Send = survival1[-1]
-        # mf_try = 1
-        # while Send < srange[1]:
-        #     mf_try = mf_try /10
-        #     Send = model.calc_survival(tlong, None,
-        #                                   mf_try * damage1, modelpars,
-        #                                   profile.concconst[0])[-1]
-        #     coll_rough.append(np.array([mf_try, Send])) # in openguts the append is done on top
-        # coll_rough = np.array(coll_rough)    # transform in numpy array to ease operations
-        # sortind = np.argsort(coll_rough[:,0])
-        # coll_rough = coll_rough[sortind]
-        # ind_hi = np.argwhere(coll_rough[:,1]<srange[0]).flatten().min()
-        # ind_lo = np.argwhere(coll_rough[:,1]>srange[0]).flatten().max()
-        # mfrange = coll_rough[ind_lo:ind_hi+1,0]
-        # rootsmall = sp.optimize.brenth(survfrac,mfrange[0],mfrange[-1],args=(tlong, damage1, modelpars[1:], 1-srange[0]))
-        # ind_hi = np.argwhere(coll_rough[:,1]<srange[1]).flatten().min()
-        # ind_lo = np.argwhere(coll_rough[:,1]>srange[1]).flatten().max()
-        # rootlarge = sp.optimize.brenth(survfrac,mfrange[0],mfrange[-1],args=(tlong, damage1, modelpars[1:], 1-srange[1]))
+    else: # SD variant, no need to specify            
         # implementation with auxiliary function
         mf1, mf2 = _find_mfrange(tlong, damage1, srange[0], modelpars)
         rootsmall = sp.optimize.brenth(survfrac,mf1,mf2,args=(tlong, damage1, modelpars[1:], 1-srange[0]))
         mf1, mf2 = _find_mfrange(tlong, damage1, srange[1], modelpars)
         rootlarge = sp.optimize.brenth(survfrac,mf1, mf2,args=(tlong, damage1, modelpars[1:], 1-srange[1]))
-
         # mfvec = np.logspace(np.log10(rootlarge),np.log10(rootsmall), len_srange)
         mfvec = np.logspace(np.log10(rootlarge*0.8),np.log10(rootsmall*1.2), len_srange) # extend a little the range in case the drop in survival is too sharp
-
-        print('start calculating S vs MF')
+        ## calculating S vs MF 
         for i in range(len_srange):
             Survpl[i] = models.calc_surv_sd_trapz(tlong, mfvec[i]*damage1, modelpars[1:])[-1]
             if propagationset is not None:
@@ -489,7 +460,7 @@ def lpx_calculation(profile, fitmodel, propagationset = None, lpxvals = [0.1,0.5
                         survmax = surv
                 Survpllo[i] = survmin
                 Survplup[i] = survmax
-        print('done calculating S vs MF')
+        ## done calculating S vs MF
         for j in range(len(lpxvals)):
             ind_lo = np.argwhere(Survpl < (1-lpxvals[j])).flatten().max()
             ind_hi = np.argwhere(Survpl > (1-lpxvals[j])).flatten().min()
@@ -537,15 +508,40 @@ def lpx_calculation(profile, fitmodel, propagationset = None, lpxvals = [0.1,0.5
         ax2[0,0].set_ylabel("Concentration ["+profile.concunits+"]")
         ax2[1,0].set_ylabel("Survival probability")
         ax2[1,0].set_xlabel("Time [d]")
+        if propagationset is not None:
+            damup = np.max(damk, axis=0)
+            damlo = np.min(damk, axis=0)
+            ax2[0,0].fill_between(tlong, damlo,damup, color = 'k',alpha= 0.2)
         for i in range(len(lpxvals)):
             ax2[0,i+1].set_ylim([0,max(profile.concarraytr[0])*max(LPx[:,0])*1.1])
             ax2[0,i+1].fill_between(profile.timetr, LPx[i,0]*profile.concarraytr[0], label = "Conc",color='blue', alpha=0.2)
             ax2[0,i+1].plot(tlong, LPx[i,0]*damage1, 'k--')
             ax2[0,i+1].set_title("MF = %.2f"%LPx[i,0])
-            surv = models.calc_surv_sd_trapz(tlong, LPx[i,0]*damage1, modelpars[1:])
+            #surv = models.calc_surv_sd_trapz(tlong, LPx[i,0]*damage1, modelpars[1:])
+            surv = model.calc_survival(tlong, 0, LPx[i,0]*damage1, modelpars, 0)
             ax2[1,i+1].plot(tlong, surv, 'k-')
             ax2[1,i+1].set_ylim([0,1.1])
             ax2[1,i+1].set_xlabel("Time [d]")
+            if propagationset is not None:
+                # ax2[0,i+1].set_title("MF = %.2f (%.2f-%.2f)"%(LPx[i,0],LPx[i,1],LPx[i,2]))
+                ax2[0,i+1].fill_between(tlong, LPx[i,0]*damlo,LPx[i,0]*damup, color = 'k',alpha= 0.2)
+                # ax2[0,i+1].fill_between(tlong, LPx[i,1]*damlo,LPx[i,0]*damup, color = 'r',alpha= 0.1)
+                # ax2[0,i+1].fill_between(tlong, LPx[i,2]*damlo,LPx[i,0]*damup, color = 'g',alpha= 0.1)
+                for k in range(len(par95)):
+                    survk[k,:] = model.calc_survival(tlong, 0, LPx[i,0]*damk[k,:], par95[k], 0)
+                survmin = np.min(survk, axis=0)
+                survmax = np.max(survk, axis=0)
+                ax2[1,i+1].fill_between(tlong,survmin,survmax, color = 'k',alpha= 0.2)
+                # for k in range(len(par95)):
+                #     survk[k,:] = models.calc_surv_sd_trapz(tlong, LPx[i,1]*damk[k,:], par95[k][1:])
+                # survmin = np.min(survk, axis=0)
+                # survmax = np.max(survk, axis=0)
+                # ax2[1,i+1].fill_between(tlong,survmin,survmax, color = 'r',alpha= 0.1)
+                # for k in range(len(par95)):
+                #     survk[k,:] = models.calc_surv_sd_trapz(tlong, LPx[i,2]*damk[k,:], par95[k][1:])
+                # survmin = np.min(survk, axis=0)
+                # survmax = np.max(survk, axis=0)
+                # ax2[1,i+1].fill_between(tlong,survmin,survmax, color = 'g',alpha= 0.1)
         plt.tight_layout()
     if len(lpxvals)==1:
         return(LPx.flatten())

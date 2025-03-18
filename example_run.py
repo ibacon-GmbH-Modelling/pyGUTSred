@@ -8,19 +8,25 @@ if __name__ == '__main__':
     #SDfit = pg.pyGUTSred(["datasets/ringtest_A_SD.txt"], "SD", hbfree=True)
     # ITfit = pg.pyGUTSred("datasets/ringtest_A_IT.txt", "IT", hbfree=True)
     # SDfit.run_and_time_parspace()
-    SDfit = pg.pyGUTSred.load_class("test_SDa.pkl")
-    profile = pg.readprofile("./profiles/efsa_so_scenario/cereal_D5_pond.txt")
-    profile.plot_exposure()
+    #SDfit = pg.pyGUTSred.load_class("test_SDa.pkl")
+    SDfit = pg.pyGUTSred(["datasets/ringtest_A_IT.txt"], "IT", hbfree=True)
+    SDfit.run_and_time_parspace()
+    roughsize = 200 # this is to make the calculation faster and not use the entire set for propagation
+    roughselect = np.random.randint(0,len(SDfit.propagationset)-1,roughsize)
+    # test = np.copy(SDfit.propagationset)
+    # np.random.shuffle(test)
+    lpvals = []
+    for i in range(1):
+        profile = pg.readprofile("./profiles/efsa_so_scenario/cereal_D5_stream.txt")
+        # profile.plot_exposure()
     # pg.lpx_calculation(profile, SDfit.model, 
     #                    propagationset = SDfit.propagationset, 
     #                    lpxvals = [0.1,0.5], 
     #                    srange = [0.05, 0.999], 
     #                    len_srange = 50)
-    lp = pg.lpx_calculation(profile, SDfit.model, 
-                       propagationset = SDfit.propagationset, 
-                       lpxvals = [0.1], 
-                       srange = [0.05, 0.999], 
-                       len_srange = 50)
+        lpvals.append(pg.lpx_calculation(profile, SDfit.model, 
+                       propagationset = SDfit.propagationset[roughselect,:], 
+                       lpxvals = [0.1], plot=True))
 
     # # pulsed exposure
     # SDpuls = pg.pyGUTSred("datasets/ringtest_B_pulsed.txt",'SD')
