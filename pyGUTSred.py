@@ -44,7 +44,7 @@ def readfile(filepath):
     
     survdata = survdata.apply(pd.to_numeric, errors='coerce')
     concdata = concdata.apply(pd.to_numeric, errors='coerce')
-    return((concclass(np.array(concdata),concunits), dataclass(np.array(survdata))))
+    return((concclass(np.array(concdata),filepath,concunits), dataclass(np.array(survdata))))
 
 def readprofile(filepath, units=''):
     # this function assumes that the file is
@@ -56,7 +56,7 @@ def readprofile(filepath, units=''):
     #       model calibration
     table = pd.read_csv(filepath,  sep='\s+', header =None)
     table = table.apply(pd.to_numeric, errors='coerce')
-    return(concclass(np.array(table), units))
+    return(concclass(np.array(table.astype(float)), filepath, units))
 
 def lcx_calculation(model, timepoints=[2,4,10,21], levels=[0.1,0.2,0.5], propagationset=None, plot=False, concunits=""):
     # the calculation of LCx values assumes always that the 
@@ -349,7 +349,7 @@ def _calculate_damage(args):
     par95_k, tlong, profile_time, profile_concarray, profile_concslopes = args
     return models.damage_linear_calc(par95_k, tlong, profile_time, profile_concarray, profile_concslopes)
 
-def lpx_calculation(profile, fitmodel, propagationset = None, lpxvals = [0.1,0.5], srange = [0.05, 0.999], len_srange = 50, plot = True):
+def lpx_calculation(profile, fitmodel, propagationset = None, lpxvals = [0.1,0.5], srange = [0.05, 0.999], len_srange = 50, plot = True, batch=False):
     def survfrac(MF, tvals, Dvals, pars, level):
         return(models.calc_surv_sd_trapz(tvals, MF*Dvals,pars)[-1] - (1-level))
     # impose 0 background mortality
@@ -543,6 +543,16 @@ def lpx_calculation(profile, fitmodel, propagationset = None, lpxvals = [0.1,0.5
                 # survmax = np.max(survk, axis=0)
                 # ax2[1,i+1].fill_between(tlong,survmin,survmax, color = 'g',alpha= 0.1)
         plt.tight_layout()
+    if batch:
+        basename = profile.name.split('/')[-1].split('.')[0]
+        nametosave1 = basename + '_mf_surv.png'
+        nametosave2 = basename + '_lpx_full.png'
+        fig.savefig(nametosave1)
+        fig2.savefig(nametosave2)
+        plt.close(fig)
+        plt.close(fig2)
+    else:
+        plt.show()
     if len(lpxvals)==1:
         return(LPx.flatten())
     else:
@@ -550,7 +560,8 @@ def lpx_calculation(profile, fitmodel, propagationset = None, lpxvals = [0.1,0.5
 
 
 class concclass:
-    def __init__(self,concdata,concunits):
+    def __init__(self,concdata,name,concunits):
+        self.name = name # to store the origin of the data
         self.concdata = concdata
         self.ntreats = concdata.shape[1] - 1
         self.timetr = concdata[:,0]
@@ -581,7 +592,7 @@ class concclass:
                             self.concarraytr[i][nan_idx] = np.interp(self.time[nan_idx], [self.time[prev_idx], self.time[next_idx]], [self.concarraytr[i][prev_idx], self.concarraytr[i][next_idx]])
                         else:
                             self.concarraytr[i][nan_idx] = np.nan
-            self.concslopestr[i,:-1] = np.diff(self.concarraytr[i])/np.diff(self.time)
+            self.concslopestr[i,:-1] = np.diff(self.concarraytr[i])/np.diff(self.time)   
             self.conctwa[i] = np.trapz(self.concarraytr[i],self.time)/self.time[-1]
             self.concmax[i] = np.max(self.concarraytr[i])
             if (np.all(self.concslopestr[i])==0) & (len(np.unique(self.concarraytr[i]))<2):

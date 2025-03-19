@@ -9,25 +9,40 @@ if __name__ == '__main__':
     # ITfit = pg.pyGUTSred("datasets/ringtest_A_IT.txt", "IT", hbfree=True)
     # SDfit.run_and_time_parspace()
     #SDfit = pg.pyGUTSred.load_class("test_SDa.pkl")
-    SDfit = pg.pyGUTSred(["datasets/ringtest_A_IT.txt"], "IT", hbfree=True)
-    SDfit.run_and_time_parspace()
+    # SDfit = pg.pyGUTSred(["datasets/ringtest_A_SD.txt"], "SD", hbfree=True)
+    # SDfit.run_and_time_parspace()
+    SDfit = pg.pyGUTSred.load_class("test_SD_test.pkl")
     roughsize = 200 # this is to make the calculation faster and not use the entire set for propagation
     roughselect = np.random.randint(0,len(SDfit.propagationset)-1,roughsize)
     # test = np.copy(SDfit.propagationset)
     # np.random.shuffle(test)
     lpvals = []
-    for i in range(1):
-        profile = pg.readprofile("./profiles/efsa_so_scenario/cereal_D5_stream.txt")
-        # profile.plot_exposure()
-    # pg.lpx_calculation(profile, SDfit.model, 
-    #                    propagationset = SDfit.propagationset, 
-    #                    lpxvals = [0.1,0.5], 
-    #                    srange = [0.05, 0.999], 
-    #                    len_srange = 50)
+    profilelist = ["./profiles/test1.txt","profiles/test2.txt",
+                   "./profiles/efsa_so_scenario/apple_R1_pond.txt",
+                   "./profiles/efsa_so_scenario/apple_R2_stream.txt",
+                   "./profiles/efsa_so_scenario/cereal_D1_ditch.txt",
+                   "./profiles/efsa_so_scenario/cereal_D1_stream.txt",
+                   "./profiles/efsa_so_scenario/cereal_D3_ditch.txt",
+                   "./profiles/efsa_so_scenario/cereal_D4_pond.txt",
+                   "./profiles/efsa_so_scenario/cereal_D4_stream.txt",
+                   "./profiles/efsa_so_scenario/cereal_D5_pond.txt",
+                   "./profiles/efsa_so_scenario/cereal_D5_stream.txt",
+                   "./profiles/efsa_so_scenario/cereal_R4_stream.txt",
+                   "./profiles/pulses_test_design/test_close_pulse.txt",
+                   "./profiles/pulses_test_design/test_wide_pulse.txt",
+                   "./profiles/ringtest_profiles/profile_focus.txt",
+                   "./profiles/ringtest_profiles/profile_monit.txt"
+                   ]
+
+    for file in profilelist[0:1]:
+        print(file)
+        profile = pg.readprofile(file)
+        # lpvals.append(pg.lpx_calculation(profile, SDfit.model, 
+        #                propagationset = SDfit.propagationset[roughselect,:], 
+        #                lpxvals = [0.1], plot=True))
         lpvals.append(pg.lpx_calculation(profile, SDfit.model, 
                        propagationset = SDfit.propagationset[roughselect,:], 
-                       lpxvals = [0.1], plot=True))
-
+                       lpxvals = [0.1,0.5], plot=True, batch=True))
     # # pulsed exposure
     # SDpuls = pg.pyGUTSred("datasets/ringtest_B_pulsed.txt",'SD')
     # ITpuls = pg.pyGUTSred("datasets/ringtest_B_pulsed.txt",'IT',preset=True)
