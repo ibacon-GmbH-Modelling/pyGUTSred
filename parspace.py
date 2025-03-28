@@ -668,7 +668,7 @@ class PyParspace:
                       self.model.parnames[self.posfree[i]], res_parspace[i,0], res_parspace[i,1], res_parspace[i,2]))
 
 
-    def _plot_samples(self,profile=None):
+    def _plot_samples(self,profile=None, savefig=False, figbasename="", extension=".png"):
         npars = self.coll_all.shape[1]-1
         chicrit_joint = 0.5 * self.opts.crit_table[npars-1]
         chicrit_single = 0.5 * self.opts.crit_table[0]
@@ -725,6 +725,8 @@ class PyParspace:
         plt.figlegend(handles, labels, loc='upper right')
         plt.tight_layout()
         plt.show()
+        if savefig:
+            plt.savefig(figbasename+"_"+self.model.variant+extension)
 
     def run_parspace(self):
         crit_add = self.opts.crit_add
@@ -743,11 +745,11 @@ class PyParspace:
         chicrit_rnd = chicrit_joint+crit_add #criterion for random mutations
         chicrit_max = max(1.2*chicrit_joint, chicrit_single+1.5) # criterion for, roughly, a 97.5% joint CI for pruning the sample
 
-        # Decided to skip regular grid and just use the latin hypercube all the times
+        # Decided to skip regular grid and just use the latin hypercube all the times but using a regular grid (scamble=False)
         n_tries = int(np.prod(tries_1))
         if self.npars>=5:
             n_tries=10000
-        sampler = qmc.LatinHypercube(d=self.npars) # dimension of the parameter space
+        sampler = qmc.LatinHypercube(d=self.npars, scramble=False) # dimension of the parameter space
         sample = sampler.random(n=n_tries) 
         l_bounds = self.model.parbound_lower[self.posfree]
         u_bounds = self.model.parbound_upper[self.posfree]
@@ -1053,7 +1055,6 @@ class PyParspace:
                     # print(flag_profile) # DEBUG
                     if ind_single < n_conf[1]:
                         ind_cont = np.argwhere(coll_tries[:,-1] < mll+self.opts.crit_add_extra).flatten().max()
-                        print(ind_cont)
                         if ind_cont < (0.5 * n_conf[1]):
                             self.coll_ok = np.append(self.coll_ok, coll_tries[0:ind_cont,:], axis=0)
                         else:
@@ -1106,15 +1107,15 @@ class PyParspace:
             self.propagationset = self.coll_all[ind_prop1:ind_prop2,:-1]
         return (0,0,0)
     
-    def replot_results(self):
+    def replot_results(self, savefig=False, figbasename="", extension=".png"):
         """
         Function to reproduce the parameter
         space plot
         """
         if self.profile:
-            self._plot_samples(self.profile)
+            self._plot_samples(self.profile, savefig=savefig, figbasename=figbasename, extension=extension)
         else:
-            self._plot_samples()
+            self._plot_samples(savefig=savefig, figbasename=figbasename, extension=extension)
         
     def reprint_results(self):
         """

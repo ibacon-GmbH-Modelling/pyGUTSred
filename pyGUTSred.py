@@ -58,7 +58,7 @@ def readprofile(filepath, units=''):
     table = table.apply(pd.to_numeric, errors='coerce')
     return(concclass(np.array(table.astype(float)), filepath, units))
 
-def lcx_calculation(model, timepoints=[2,4,10,21], levels=[0.1,0.2,0.5], propagationset=None, plot=False, concunits=""):
+def lcx_calculation(model, timepoints=[2,4,10,21], levels=[0.1,0.2,0.5], propagationset=None, plot=False, concunits="", savefig=False, figname='', extension='.png'):
     # the calculation of LCx values assumes always that the 
     # exposure is constant
     def survfrac(conc,timevector,modelpars,level):
@@ -134,6 +134,8 @@ def lcx_calculation(model, timepoints=[2,4,10,21], levels=[0.1,0.2,0.5], propaga
         plt.legend(fontsize=12)
         plt.tight_layout()
         plt.show()
+        if savefig:
+            plt.savefig(figname+"_"+model.variant+"_LCx"+extension)
     # printing the results
     print("----------------------------------------------------------------")
     print("LCx values:")
@@ -146,8 +148,9 @@ def lcx_calculation(model, timepoints=[2,4,10,21], levels=[0.1,0.2,0.5], propaga
         for j in range(len(levels)):
             values = values + "{:<7.3g} ({:<7.3g} - {:<7.3g})       ".format(LCx[i,j], LCxlo[i,j], LCxup[i,j])
         print(values)
+    return([LCx, LCxlo, LCxup])
 
-def plot_data_model(fit, datastruct, concstruct, model, propagationset, modellabel='model', add_obspred=True):
+def plot_data_model(fit, datastruct, concstruct, model, propagationset, modellabel='model', add_obspred=True, savefig=False, figname='', extension='.png'):
     '''
     Function to plot data and/or model
     Arguments:
@@ -247,6 +250,10 @@ def plot_data_model(fit, datastruct, concstruct, model, propagationset, modellab
             fig.suptitle("Dataset %d"%(nd+1))
             fig.tight_layout()
             plt.show()
+            if savefig:
+                fig.savefig(figname+"_"+model.variant+"_dataset%d"%(nd+1)+extension)
+                if add_obspred:
+                    fig2.savefig(figname+"_"+model.variant+"_dataset%d_obs_pred"%(nd+1)+extension)
     else:
         print("fit can be only 0 (data only), 1 (data and best fit), or 2 (data, best fit, and confidence interval)")
 
@@ -263,6 +270,7 @@ def EFSA_quality_criteria(datastruct, concstruct, model):
         sppe = np.zeros(concset.ntreats)
         modelpars = np.copy(10**model.parvals*model.islog + model.parvals*(1-model.islog))
         modelpars = modelpars[[0,1,2]+[3+nd]]
+        results = dict()
         for i in range(concset.ntreats):
             nmax = dataset.survarray[i,0]
             damage = model.calc_damage(modelpars[0],dataset.timeext[i], concset.time, 
@@ -296,8 +304,14 @@ def EFSA_quality_criteria(datastruct, concstruct, model):
         for i in range(concset.ntreats):
             print("{:<12.0f} {:#.3g} %".format(i, sppe[i]))
         print("----------------------------------------------")
+        results['R2'] = 1-ssq_fit/ssq_tot
+        results['NRMSE'] = nrmse
+        results['R2_0'] = 1-ssq_fit0/ssq_tot0
+        results['NRMSE_0'] = nrmse0
+        results['SPPE'] = sppe
+    return(results)
 
-def validate(validationfile, fitmodel, propagationset, hbfix = True):
+def validate(validationfile, fitmodel, propagationset, hbfix = True, plot = True, savefig=False, figname='', extension='.png'):
         tmp = readfile(validationfile)
         valconc = np.array([])
         valdata = np.array([])
@@ -313,21 +327,22 @@ def validate(validationfile, fitmodel, propagationset, hbfix = True):
         if hbfix:
             res = sp.optimize.minimize(models.hb_fit_ll, 
                                    x0=model.parvals[-1], 
-                                   args=(valdata[0].time,valdata[0].deatharray[0]),
+                                   args=(valdata[0].timetreat[0],valdata[0].deatharraytreat[0]),
                                    method='Nelder-Mead',
                                    bounds=[(model.parbound_lower[-1], model.parbound_upper[-1])])
             model.parvals[-1] = res.x
             print("hb fitted to control data: %.4f"%(model.parvals[-1]))
         print("Validation of model with %s variant"%model.variant)
-        EFSA_quality_criteria(np.array(valdata), np.array(valconc), model)
+        valres = EFSA_quality_criteria(np.array(valdata), np.array(valconc), model)
         if propagationset is None:
-            plot_data_model(fit =1,datastruct=valdata,concstruct=valconc,model=model,propagationset=None)
+            plot_data_model(fit =1,datastruct=valdata,concstruct=valconc,model=model,propagationset=None, savefig=savefig, figname=figname, extension=extension)
         else:
             # This will need to change if I want to validate multiple datasets at the same time
             fillhb = np.zeros((len(propagationset),1))
             fillhb[:] = model.parvals[-1]
             par95 = np.hstack((propagationset[:,model.posfree<3], fillhb))
-            plot_data_model(fit=2,datastruct=valdata,concstruct=valconc,model=model,propagationset=par95)
+            plot_data_model(fit=2,datastruct=valdata,concstruct=valconc,model=model,propagationset=par95, savefig=savefig, figname=figname, extension=extension)
+        return(valres)
 
 def _find_mfrange(timevec, damage, survtest, parsset):
     # auxiliary function to calculate the range of multiplication
@@ -349,7 +364,7 @@ def _calculate_damage(args):
     par95_k, tlong, profile_time, profile_concarray, profile_concslopes = args
     return models.damage_linear_calc(par95_k, tlong, profile_time, profile_concarray, profile_concslopes)
 
-def lpx_calculation(profile, fitmodel, propagationset = None, lpxvals = [0.1,0.5], srange = [0.05, 0.999], len_srange = 50, plot = True, batch=False):
+def lpx_calculation(profile, fitmodel, propagationset = None, lpxvals = [0.1,0.5], srange = [0.05, 0.999], len_srange = 50, plot = True, batch=False, figname="", extension='.png'):
     def survfrac(MF, tvals, Dvals, pars, level):
         return(models.calc_surv_sd_trapz(tvals, MF*Dvals,pars)[-1] - (1-level))
     # impose 0 background mortality
@@ -544,9 +559,9 @@ def lpx_calculation(profile, fitmodel, propagationset = None, lpxvals = [0.1,0.5
                 # ax2[1,i+1].fill_between(tlong,survmin,survmax, color = 'g',alpha= 0.1)
         plt.tight_layout()
     if batch:
-        basename = profile.name.split('/')[-1].split('.')[0]
-        nametosave1 = basename + '_mf_surv.png'
-        nametosave2 = basename + '_lpx_full.png'
+        basename = figname #profile.name.split('/')[-1].split('.')[0]
+        nametosave1 = basename +'_mf_surv'+extension
+        nametosave2 = basename +'_lpx_full'+extension
         fig.savefig(nametosave1)
         fig2.savefig(nametosave2)
         plt.close(fig)
@@ -564,7 +579,7 @@ class concclass:
         self.name = name # to store the origin of the data
         self.concdata = concdata
         self.ntreats = concdata.shape[1] - 1
-        self.timetr = concdata[:,0]
+        self.timetr = concdata[:,0] # needed only for plotting
         self.time = concdata[:,0]
         self.concarraytr = np.transpose(concdata[:,1:])
         self.concslopestr = np.zeros_like(self.concarraytr)
@@ -573,6 +588,10 @@ class concclass:
         self.concconst = np.zeros(self.ntreats) 
         self.concmax = np.zeros(self.ntreats)
         self.concunits = concunits
+        # all the following is to account for all the cases in which the data is not complete
+        # in presence of NaNs the values areinterpolated beteween the
+        # closest non-NaN values. If only one values is given, then the concentration is
+        # assumed constant
         for i in range(self.ntreats):
             nans, x = np.isnan(self.concarraytr[i]), lambda z: z.nonzero()[0]
             if np.sum(~nans) == 1:
@@ -603,7 +622,7 @@ class concclass:
         self.concslopes = tmpslopes.reshape((self.ntreats,len(self.time)))
         self.concarray = tmparray.reshape((self.ntreats,len(self.time)))
 
-    def plot_exposure(self):
+    def plot_exposure(self, savefig=False, figname='', extension='.png'):
         fig = plt.figure()
         ax = fig.subplots(1,self.ntreats)
         cmax = np.max(self.concmax)
@@ -620,6 +639,8 @@ class concclass:
             ax[0].set_ylabel("Concentration [%s]"%self.concunits)
         plt.tight_layout()
         plt.show()
+        if savefig:
+            fig.savefig(figname+"_"+self.name+"_conc"+extension)
 
 
 class dataclass:
@@ -660,19 +681,6 @@ class dataclass:
             tmpupplim = np.minimum(1,a+b)
             self.lowlimtreat.append(tmplowlim)
             self.upplimtreat.append(tmpupplim)
-            # self.deatharray[i,:len(self.time)-1] = np.array(-np.diff(survdata[:,i+1]))
-            # self.deatharray[i,-1] = survdata[-1,i+1]
-            # ninit = survdata[0,i+1]
-            # # Wilson score interval on data probabilities.
-            # # https://en.wikipedia.org/wiki/Binomial_proportion_confidence_interval#Wilson_score_interval
-            # survprop = survdata[:,i+1]/ninit
-            # self.survprobs[i,:] = survprop
-            # a = (survprop + z**2/(2*ninit))/(1+z**2/ninit)
-            # b = z/(1+z**2/ninit) * np.sqrt(survprop*(1-survprop)/ninit + z**2/(4*ninit**2))
-            # a[0]=1
-            # b[0]=0
-            # self.lowlim[i,:] = np.maximum(0,a-b)
-            # self.upplim[i,:] = np.minimum(1,a+b)
             
 # this class inherits from PyParspace and extends the functionalities
 class pyGUTSred(parspace.PyParspace):
@@ -805,7 +813,7 @@ class pyGUTSred(parspace.PyParspace):
         for i in range(self.ndatasets):
             res = sp.optimize.minimize(models.hb_fit_ll, 
                                    x0=self.parvals[2+(i+1)], 
-                                   args=(self.datastruct[i].time,self.datastruct[i].deatharray[0]),
+                                   args=(self.datastruct[i].timetreat[0],self.datastruct[i].deatharraytreat[0]),
                                    method='Nelder-Mead',
                                    bounds=[(self.lbound[2+(i+1)], self.ubound[2+(i+1)])])
             self.parvals[2+(i+1)] = res.x
@@ -832,15 +840,17 @@ class pyGUTSred(parspace.PyParspace):
         stop = time.time()
         print("Elapsed time for the parameter space exploration: %.4f"%(stop-start))
 
-    def plot_data_model(self,fit,modellabel='model', add_obspred=True):
+    def plot_data_model(self,fit,modellabel='model', add_obspred=True, savefig=False, figname=''):
         plot_data_model(fit=fit, datastruct=self.datastruct, concstruct=self.concstruct, model=self.model,
-                        propagationset = self.propagationset, modellabel=modellabel, add_obspred=add_obspred)
+                        propagationset = self.propagationset, modellabel=modellabel, add_obspred=add_obspred,
+                        savefig=savefig, figname=figname)
 
     def EFSA_quality_criteria(self):
-        EFSA_quality_criteria(self.datastruct, self.concstruct, self.model)
+        efsares = EFSA_quality_criteria(self.datastruct, self.concstruct, self.model)
+        return(efsares)
 
-    def lcx_calculation(self, timepoints=[2,4,10,21],levels=[0.1,0.2,0.5], plot=False, propagationset=None):
-        lcx_calculation(self.model, timepoints=timepoints, levels=levels, propagationset=propagationset, plot=plot, concunits=self.concunits)
+    def lcx_calculation(self, timepoints=[2,4,10,21],levels=[0.1,0.2,0.5], plot=False, propagationset=None, savefig=False, figname='', extension='.png'):
+        lcxvals = lcx_calculation(self.model, timepoints=timepoints, levels=levels, propagationset=propagationset, plot=plot, concunits=self.concunits,
+                        savefig=savefig, figname=figname, extension=extension)
+        return(lcxvals)
 
-    def lpx_calculation(self):
-        pass
