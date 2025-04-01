@@ -978,16 +978,12 @@ class PyParspace:
             # TESTING PROFILING WITH REDUCED SAMPLE. REMOVE AFTER TESTING
             # self.coll_all = np.copy(self.coll_all[np.unique(np.sort(np.random.randint(0,len(coll_allL),500)))])
             # END TEST
-            
+            # sequential implementation replaced with parallel implementation
             # for i in range(self.npars):
             #     parprofile.append(self._parameter_profile_sub(i))
-
-            # TODO: fix the parallel implementation. As it is, does not work
             with mp.Pool(n_cores) as pool:
                 results = pool.starmap(parameter_profile_sub_wrapper, [(i, self) for i in range(self.npars)])
                 parprofile, pbest, coll_ok = zip(*results)
-            # for i in range(self.npars):
-            #     parprofile[i], pbest[i] = parameter_profile_sub_wrapper(i,self)
             # TODO proper pruning of the profiling results
             self.pbest = pbest[np.argmin([p[-1] for p in pbest])]
             #self.coll_ok = coll_ok[np.argmin([p[-1] for p in pbest])] # take the best value
@@ -1048,7 +1044,6 @@ class PyParspace:
                     # print("size coll_all ",self.coll_all.shape)
                     # print("ind_final: ",ind_final)
                     # print("ind_single: ",ind_single)
-
                     flag_profile=self._test_profile(self.coll_all, parprofile, self.opts)
                     # print(self.coll_ok)
                     # print("flag_profile")
@@ -1097,6 +1092,7 @@ class PyParspace:
             self.pbest = self.coll_all[0,:]
             self.model.parvals[self.posfree] = self.pbest[:-1]
             self.fullset = np.copy(self.model.parvals)
+            self.bestaic = 2*self.pbest[-1]+2*self.npars
 
             self._plot_samples(parprofile)
             self.profile = parprofile

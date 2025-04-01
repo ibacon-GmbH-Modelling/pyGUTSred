@@ -683,6 +683,8 @@ class pyGUTSred(parspace.PyParspace):
         self.hbfree = hbfree
         self.calibpath = datafile
         self.ndatasets = len(datafile)
+        self.fullset = []
+        self.bestaic = np.inf
         print("number of datasets")
         print(self.ndatasets)
         # initialize empty arrays to store the data
