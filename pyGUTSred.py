@@ -79,9 +79,6 @@ def lcx_calculation(model, timepoints=[2,4,10,21], levels=[0.1,0.2,0.5], propaga
         par95 = 10**par95*model.islog + par95*(1-model.islog)
         par95[:,-model.ndatasets:] = 0 # remove the background mortality
         par95 = par95[:,:4]
-        # par95 = 10**propagationset*model.islog + propagationset*(1-model.islog)
-        # par95[:,-model.ndatasets:] = 0 # remove the background mortality
-        # par95 = par95[:,:4]
     for i in range(len(timepoints)):
         timevectors = np.linspace(0,timepoints[i],model.nbinsperday)
         for j in range(len(levels)):
@@ -105,7 +102,6 @@ def lcx_calculation(model, timepoints=[2,4,10,21], levels=[0.1,0.2,0.5], propaga
                 crit = 1
                 while crit>0:
                     conclims[1] = conclims[1] * 10 # shift lower and upper range by factor of 10
-                    #crit   = survfrac(conclims[1],timevectors,modelpars,levels[j]) - (1-levels[j]) # calculate criterion from upper range  
                     crit   = survfrac(conclims[1],timevectors,modelpars,levels[j]) # calculate criterion from upper range  
                 LCx[i,j] = sp.optimize.brenth(survfrac,conclims[0],conclims[1],args=(timevectors,modelpars,levels[j]))
                 if (propagationset is not None):
@@ -114,7 +110,6 @@ def lcx_calculation(model, timepoints=[2,4,10,21], levels=[0.1,0.2,0.5], propaga
                         crit = 1
                         while crit>0:
                             conclims[1] = conclims[1] * 10
-                            #crit   = survfrac(conclims[1],timevectors,k,levels[j]) - (1-levels[j]) # calculate criterion from upper range
                             crit   = survfrac(conclims[1],timevectors,k,levels[j]) # calculate criterion from upper range
                         lcx = sp.optimize.brenth(survfrac,conclims[0],conclims[1],args=(timevectors,k,levels[j]))
                         if lcx <= lcxmin:
@@ -334,14 +329,15 @@ def validate(validationfile, fitmodel, propagationset, hbfix = True, plot = True
             print("hb fitted to control data: %.4f"%(model.parvals[-1]))
         print("Validation of model with %s variant"%model.variant)
         valres = EFSA_quality_criteria(np.array(valdata), np.array(valconc), model)
-        if propagationset is None:
-            plot_data_model(fit =1,datastruct=valdata,concstruct=valconc,model=model,propagationset=None, savefig=savefig, figname=figname, extension=extension)
-        else:
-            # This will need to change if I want to validate multiple datasets at the same time
-            fillhb = np.zeros((len(propagationset),1))
-            fillhb[:] = model.parvals[-1]
-            par95 = np.hstack((propagationset[:,model.posfree<3], fillhb))
-            plot_data_model(fit=2,datastruct=valdata,concstruct=valconc,model=model,propagationset=par95, savefig=savefig, figname=figname, extension=extension)
+        if plot:
+            if propagationset is None:
+                plot_data_model(fit =1,datastruct=valdata,concstruct=valconc,model=model,propagationset=None, savefig=savefig, figname=figname, extension=extension)
+            else:
+                # This will need to change if I want to validate multiple datasets at the same time
+                fillhb = np.zeros((len(propagationset),1))
+                fillhb[:] = model.parvals[-1]
+                par95 = np.hstack((propagationset[:,model.posfree<3], fillhb))
+                plot_data_model(fit=2,datastruct=valdata,concstruct=valconc,model=model,propagationset=par95, savefig=savefig, figname=figname, extension=extension)
         return(valres)
 
 def _find_mfrange(timevec, damage, survtest, parsset):
@@ -364,7 +360,7 @@ def _calculate_damage(args):
     par95_k, tlong, profile_time, profile_concarray, profile_concslopes = args
     return models.damage_linear_calc(par95_k, tlong, profile_time, profile_concarray, profile_concslopes)
 
-def lpx_calculation(profile, fitmodel, propagationset = None, lpxvals = [0.1,0.5], srange = [0.05, 0.999], len_srange = 50, plot = True, batch=False, figname="", extension='.png'):
+def lpx_calculation(profile, fitmodel, propagationset = None, lpxvals = [0.1,0.5], srange = [0.05, 0.999], len_srange = 50, plot = True, batch=False, savefig=False, figname="", extension='.png'):
     def survfrac(MF, tvals, Dvals, pars, level):
         return(models.calc_surv_sd_trapz(tvals, MF*Dvals,pars)[-1] - (1-level))
     # impose 0 background mortality
@@ -532,42 +528,35 @@ def lpx_calculation(profile, fitmodel, propagationset = None, lpxvals = [0.1,0.5
             ax2[0,i+1].fill_between(profile.timetr, LPx[i,0]*profile.concarraytr[0], label = "Conc",color='blue', alpha=0.2)
             ax2[0,i+1].plot(tlong, LPx[i,0]*damage1, 'k--')
             ax2[0,i+1].set_title("MF = %.2f"%LPx[i,0])
-            #surv = models.calc_surv_sd_trapz(tlong, LPx[i,0]*damage1, modelpars[1:])
             surv = model.calc_survival(tlong, 0, LPx[i,0]*damage1, modelpars, 0)
             ax2[1,i+1].plot(tlong, surv, 'k-')
             ax2[1,i+1].set_ylim([0,1.1])
             ax2[1,i+1].set_xlabel("Time [d]")
             if propagationset is not None:
-                # ax2[0,i+1].set_title("MF = %.2f (%.2f-%.2f)"%(LPx[i,0],LPx[i,1],LPx[i,2]))
                 ax2[0,i+1].fill_between(tlong, LPx[i,0]*damlo,LPx[i,0]*damup, color = 'k',alpha= 0.2)
-                # ax2[0,i+1].fill_between(tlong, LPx[i,1]*damlo,LPx[i,0]*damup, color = 'r',alpha= 0.1)
-                # ax2[0,i+1].fill_between(tlong, LPx[i,2]*damlo,LPx[i,0]*damup, color = 'g',alpha= 0.1)
                 for k in range(len(par95)):
                     survk[k,:] = model.calc_survival(tlong, 0, LPx[i,0]*damk[k,:], par95[k], 0)
                 survmin = np.min(survk, axis=0)
                 survmax = np.max(survk, axis=0)
                 ax2[1,i+1].fill_between(tlong,survmin,survmax, color = 'k',alpha= 0.2)
-                # for k in range(len(par95)):
-                #     survk[k,:] = models.calc_surv_sd_trapz(tlong, LPx[i,1]*damk[k,:], par95[k][1:])
-                # survmin = np.min(survk, axis=0)
-                # survmax = np.max(survk, axis=0)
-                # ax2[1,i+1].fill_between(tlong,survmin,survmax, color = 'r',alpha= 0.1)
-                # for k in range(len(par95)):
-                #     survk[k,:] = models.calc_surv_sd_trapz(tlong, LPx[i,2]*damk[k,:], par95[k][1:])
-                # survmin = np.min(survk, axis=0)
-                # survmax = np.max(survk, axis=0)
-                # ax2[1,i+1].fill_between(tlong,survmin,survmax, color = 'g',alpha= 0.1)
         plt.tight_layout()
     if batch:
-        basename = figname #profile.name.split('/')[-1].split('.')[0]
-        nametosave1 = basename +'_mf_surv'+extension
-        nametosave2 = basename +'_lpx_full'+extension
-        fig.savefig(nametosave1)
-        fig2.savefig(nametosave2)
         plt.close(fig)
         plt.close(fig2)
+        if savefig:
+            basename = figname
+            nametosave1 = basename +'_mf_surv'+extension
+            nametosave2 = basename +'_lpx_full'+extension
+            fig.savefig(nametosave1)
+            fig2.savefig(nametosave2)
     else:
         plt.show()
+        if savefig:
+            basename = figname
+            nametosave1 = basename +'_mf_surv'+extension
+            nametosave2 = basename +'_lpx_full'+extension
+            fig.savefig(nametosave1)
+            fig2.savefig(nametosave2)
     if len(lpxvals)==1:
         return(LPx.flatten())
     else:
@@ -649,7 +638,6 @@ class dataclass:
         self.ntreats = survdata.shape[1] - 1
         self.time = survdata[:,0]
         self.survarray = np.transpose(survdata[:,1:])
-        self.deatharray = np.zeros((self.ntreats,len(self.time)))
         self.survprobs = np.zeros((self.ntreats,len(self.time)))
         self.lowlim = np.zeros((self.ntreats,len(self.time)))
         self.upplim = np.zeros((self.ntreats,len(self.time)))
@@ -671,7 +659,7 @@ class dataclass:
             ninit = survdata[0,i+1] # time 0 in principle should never have a nan value
             tmpprob = tmpsurv/ninit
             self.survprobstreat.append(tmpprob)
-            # Wilson score interval on data probabilities.
+            # Wilson score interval on data probabilities. From openGUTS code
             # https://en.wikipedia.org/wiki/Binomial_proportion_confidence_interval#Wilson_score_interval
             a = (tmpprob + z**2/(2*ninit))/(1+z**2/ninit)
             b = z/(1+z**2/ninit) * np.sqrt(tmpprob*(1-tmpprob)/ninit + z**2/(4*ninit**2))
@@ -753,10 +741,6 @@ class pyGUTSred(parspace.PyParspace):
         self.plot_data_model(fit=0)
 
     def _preset_pars(self):
-        #FIX this
-        # need to set up the conditions with multiple
-        # values for the background mortality depending
-        # on the number of datasets
         self.isfree = np.concatenate(([1,1,1],[0]*self.ndatasets)) # last positions are for the hb values
         self.islog = np.concatenate(([1,1,0],[0]*self.ndatasets))
         self.lbound = np.zeros(3+self.ndatasets)
@@ -800,7 +784,6 @@ class pyGUTSred(parspace.PyParspace):
         self.lbound = np.log10(self.lbound)*self.islog+self.lbound*(1-self.islog)
         self.ubound = np.log10(self.ubound)*self.islog+self.ubound*(1-self.islog)    
         self.parvals = (self.lbound+self.ubound)/2
-        #self.parvalues = np.log10(self.parvalues)*self.islog+self.parvalues*(1-self.islog)
         print("Parameter settings:")
         print("parnames: ",self.parnames)
         print("parameters lower bounds: ",self.lbound)
@@ -808,7 +791,6 @@ class pyGUTSred(parspace.PyParspace):
         print("parameters are log-transformed: ",self.islog)
         print("parameters are free: ",self.isfree)
 
-    # TODO: modify for multiple datasets
     def fit_hb(self):
         for i in range(self.ndatasets):
             res = sp.optimize.minimize(models.hb_fit_ll, 
@@ -840,10 +822,10 @@ class pyGUTSred(parspace.PyParspace):
         stop = time.time()
         print("Elapsed time for the parameter space exploration: %.4f"%(stop-start))
 
-    def plot_data_model(self,fit,modellabel='model', add_obspred=True, savefig=False, figname=''):
+    def plot_data_model(self,fit,modellabel='model', add_obspred=True, savefig=False, figname='', extension='.png'):
         plot_data_model(fit=fit, datastruct=self.datastruct, concstruct=self.concstruct, model=self.model,
                         propagationset = self.propagationset, modellabel=modellabel, add_obspred=add_obspred,
-                        savefig=savefig, figname=figname)
+                        savefig=savefig, figname=figname, extension=extension)	
 
     def EFSA_quality_criteria(self):
         efsares = EFSA_quality_criteria(self.datastruct, self.concstruct, self.model)
