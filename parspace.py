@@ -164,8 +164,31 @@ class SettingParspace:
         difference between new optimum and old optimum for printout
     n_max : int
         maximum number of rounds for the algorithm
+    slowkin_corr : float
+        minimum correlation coefficient between kd and zs
+    slowkin_pars : float
+        closeness of kd and zs to their lower bound (as fraction of total range)
+    slowkin_f_mw : float
+        factor to multiply current-highest zs to get new upper bound
+    slowkin_f_kd
+        factor by which to multiply current-highest kd to get new upper bound
     '''
     def __init__(self, rough, profile=0):
+        """
+        Initialize the settings for the parameter space explorer.
+        Parameters:
+        -----------
+        rough : bool
+            If True, use rough settings for the parameter space exploration.
+        profile : int, optional
+            If true calculate the likelihood profile for each of the free 
+            parameters of the model.
+        Notes:
+        ------
+        If `rough` is True, the settings are adjusted for a rough exploration, 
+        including fewer initial grid points, adjusted stop criteria, and a reduced 
+        maximum number of rounds.
+        """
         self.profile = profile
         self.rough = rough
         self.crit_table = np.array([3.8415, 5.9915,7.8147,9.4877,11.07,12.592,14.0671,15.5073,16.9190,18.3070])        
@@ -219,7 +242,8 @@ class SettingParspace:
             self.gap_extra  = 2*0.25; # the gap distance between profile and sample that triggers resampling
             self.n_max = 4;  # maximum number of rounds for the algorithm (default 12)
 
-
+# Auxiliary function for the parallel calculation of the
+# likelihood profile for each free parameter of the model
 def parameter_profile_sub_wrapper(index, instance):
     return instance._parameter_profile_sub(index)
 
@@ -235,8 +259,8 @@ class PyParspace:
         set used to start the next exploration (empty at the end)
     fullset : np.array
         complete list of model parameters
-    mll : float
-        best mll value
+    bestaic : float
+        best AIC value
     model : ModelSetUp object
         stores the model information
     npars : int
@@ -303,17 +327,24 @@ class PyParspace:
         self.fullset = np.copy(self.model.parvals) # stores the full set of parameters
         self._startp = np.copy(self.model.parvals) # needed for internal operations 
 
-    # this is the fastest approach, but it is not easly trasferrable to more complex problems because
-    # it requires that we can use numba in any part of the code which is not given for more complex
-    # problems (see GUTS)
-    # numba does not work when called here within the class
-    #@jit(nopython=True, parallel=True)
+    # Using here sequential approach as the model is not computationally heavy
+    # enough to offset the overhead of parallelization
     def _applylog(self,sample_scaled):
        llog = np.zeros(sample_scaled.shape[0])
        for i in range(sample_scaled.shape[0]):
            llog[i]=self.model.log_likelihood(sample_scaled[i],self._startp,self.posfree)
        return llog
     
+    # mp version much slower for easy models
+    # this function should be used in case of comnputationally
+    # heavy models
+    # def _applylog(self, sample_scaled):
+    #     log_likelihood_partial = partial(self.model.log_likelihood, allpars=self.model.parvals, posfree=self.posfree)
+    #     with mp.Pool(6) as pool:
+    #         llog2 = pool.map(log_likelihood_partial, sample_scaled)
+    #     return np.array(llog2)
+    
+    # "Private" method to perform a standard optimization using the Nelder-Mead algorithm
     def _NM_minimizer(self, pfit, allpars, posfree, rough=0):
         if self.npars==1:
             bounds=None
@@ -329,15 +360,6 @@ class PyParspace:
                              x0=pfit, method="Nelder-Mead", args=(allpars,posfree), options={'xatol':1e-6, 'fatol':1e-6},
                              bounds=bounds)
         return(res.x, res.fun)
-
-    # mp version much slower for easy models
-    # this function should be used in case of comnputationally
-    # heavy models
-    # def _applylog(self, sample_scaled):
-    #     log_likelihood_partial = partial(self.model.log_likelihood, allpars=self.model.parvals, posfree=self.posfree)
-    #     with mp.Pool(6) as pool:
-    #         llog2 = pool.map(log_likelihood_partial, sample_scaled)
-    #     return np.array(llog2)
 
     #@jit(nopython=True, parallel=True)
     def _random_mutations(self,selectedsample, l_bounds,u_bounds,n_tr_i, f_d_i_dgrid):
@@ -369,9 +391,10 @@ class PyParspace:
         mutatesample_nonan = mutatesample[mask]
         return (mutatesample_nonan, mutatellog_nonan)
     
+    # function to check if the profile is if problematic with respect to the sample
     def _test_profile(self, coll_all, parprofile, settings):
-        # FIX this function because it feels like it is not working properly
-        ind_fit = np.copy(self.posfree)
+        # This function might need some more testing
+        # ind_fit = np.copy(self.posfree)
         coll_ok = np.zeros((0,self.npars+1))
         coll_all = np.copy(coll_all)
         flag_profile = [0, 0]
@@ -417,9 +440,11 @@ class PyParspace:
         # print(self.coll_ok)
         return flag_profile
 
+    # Perform the profile likelihood for the parameter at index <index>
     def _parameter_profile_sub(self,index):
-        # need to copy the values otherwise something funny happen with the arrays
-        # and the values where modified
+        # without np.copy, the assignment is by reference
+        # and the original array is modified and this creates
+        # problems with the routine
         coll_allL = np.copy(self.coll_all[:,-1])
         coll_all = np.copy(self.coll_all[:,:-1])
         npars = self.npars
@@ -598,6 +623,8 @@ class PyParspace:
         coll_ok = coll_ok[0:ind_ok,:]
         return parprof, pbest, coll_ok
     
+    # print on screen the results of the parameter space explorer.
+    # This is a "private" method, not to be called from outside the class
     def _print_results(self, profile=None):
         if self.opts.profile:
             chicrit_single = 0.5 * self.opts.crit_table[0]
@@ -667,8 +694,23 @@ class PyParspace:
                 print("{:<15}: {:<10.4f} ({:<10.4f} {:<10.4f})".format(
                       self.model.parnames[self.posfree[i]], res_parspace[i,0], res_parspace[i,1], res_parspace[i,2]))
 
-
+    # "private" method function that generates the figure with the sampling of 
+    # the parameter space explorer includes arguments to save the resulting figure
     def _plot_samples(self,profile=None, savefig=False, figbasename="", extension=".png"):
+        '''
+        Plot the results of the parameter space explorer
+        Arguments:
+        ----------
+        profile : list
+            list of np.arrays with parameter likelihood profiling
+            length of the list is the number of free parameters
+        savefig : bool
+            flag to save the figure
+        figbasename : str
+            base name of the figure
+        extension : str
+            extension of the figure
+        '''
         npars = self.coll_all.shape[1]-1
         chicrit_joint = 0.5 * self.opts.crit_table[npars-1]
         chicrit_single = 0.5 * self.opts.crit_table[0]
@@ -728,6 +770,8 @@ class PyParspace:
         if savefig:
             plt.savefig(figbasename+"_"+self.model.variant+extension)
 
+    # Run the paramter space explorer with the given options defined in the 
+    # intialization of the class
     def run_parspace(self):
         crit_add = self.opts.crit_add
         n_tr = self.opts.n_tr
@@ -942,8 +986,6 @@ class PyParspace:
             # coll_all = np.append([coll_all[0]], coll_all[1:,:][mask!=self.npars], axis=0)
             # coll_allL = np.append(coll_allL[0], coll_allL[1:][mask!=self.npars])
             # print("Removed ", sum(mask), " duplicate values")
-    
-    
         print('Loop is over')
     
         # perform now a simplex optimization
@@ -1106,10 +1148,19 @@ class PyParspace:
     def replot_results(self, savefig=False, figbasename="", extension=".png"):
         """
         Function to reproduce the parameter
-        space plot
+        space plot calling the function _plot_samples
+        
+        Arguments
+        ---------
+        savefig : bool
+            flag to save the figure
+        figbasename : string
+            base name of the figure
+        extension : string
+            extension of the figure
         """
         if self.profile:
-            self._plot_samples(self.profile, savefig=savefig, figbasename=figbasename, extension=extension)
+            self._plot_samples(profile=self.profile, savefig=savefig, figbasename=figbasename, extension=extension)
         else:
             self._plot_samples(savefig=savefig, figbasename=figbasename, extension=extension)
         

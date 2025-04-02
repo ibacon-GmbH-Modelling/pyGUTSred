@@ -13,6 +13,18 @@ def damage_calculation(y,t,C,timextr,kd):
 
 @jit(nopython=1)
 def damage_linear_calc(kd, timeext, timeconc, conc, slopes):
+    '''
+    Calculate the damage variable using a linear approximation of 
+    the concentration. This is the same as the openGUTS code.
+    The function is precompiled using numba.
+
+    Arguments:
+    kd -- damage repair/elimination rate
+    timeext -- extended time vector
+    timeconc -- time vector of the concentration data
+    conc -- vector of concentration values
+    slopes -- vector of slopes of the concentration data
+    '''
     damage = np.zeros_like(timeext)
     Dw0 =0
     damage[0] = Dw0
@@ -44,9 +56,6 @@ def calc_survival_SD(y,t,D,pars):
 def calc_surv_sd_trapz(tvals, Dvals,pars):
     bw,zw,hb=pars
     hz = bw*(np.maximum(Dvals-zw,0))
-    # hzcum = np.zeros_like(Dvals)
-    # for i in range(1, len(tvals)):
-    #     hzcum[i] = np.trapz(hz[:i+1], tvals[:i+1])
     hzcum = spi.cumtrapz(hz, tvals, initial=0)
     Sc = np.minimum(1,np.exp(-hzcum))
     Sc = Sc * np.exp(-hb*tvals)
@@ -112,18 +121,62 @@ def loglikelihood(modelvector, commontime, deathvector):
 
 
 class GUTSmodels:
+    '''
+    Class that contains the functions that are used to calculate the likelihood
+    of the GUTS model.
+
+    Attributes:
+    - variant: string that specifies the variant of the GUTS model (SD or IT)
+    - ndatasets: number of datasets
+    - concstruct: list of concentration data structures
+    - datastruct: list of survival data structures
+    - nbinsperday: number of bins per day
+    - timeext: extended time vector
+    - index_commontime: indices of the common time points between the concentration and survival data
+    - parnames: list of parameter names
+    - parvals: list of parameter values
+    - islog: list of booleans that specify if the parameter is log-transformed
+    - isfree: list of booleans that specify if the parameter is free
+    - posfree: indices of the free parameters
+    - parbound_lower: list of lower bounds for the parameters
+    - parbound_upper: list of upper bounds for the parameters
+
+    Methods:
+    - calc_ext_time: calculate the extended time vector and the indices of the common time points with the 
+                     original survival data	
+    - calc_damage: calculate the damage variable
+    - calc_survival: calculate the survival probability
+    - log_likelihood: calculate the log-likelihood of the GUTS model
+    '''
     def __init__(self, survstruct, concstruct, variant,
                  parnames,
                  parvals,islog, isfree, 
                  parbound_lower, parbound_upper,
                  nbinsperday=96):
+        '''
+        Constructor for the GUTSmodels class. This class contains the
+        functions that are used to calculate the likelihood of the GUTS
+        model. The class is initialized with the following arguments:
+
+        Arguments:
+          - survstruct: list of survival data structures (length depends on the number of datasets)
+          - concstruct: list of concentration data structures (length depends on the number of datasets)
+          - variant: string that specifies the variant of the GUTS model (SD or IT)
+            - parnames: list of parameter names
+            - parvals: list of parameter values
+            - islog: list of booleans that specify if the parameter is log-transformed
+            - isfree: list of booleans that specify if the parameter is free
+            - parbound_lower: list of lower bounds for the parameters
+            - parbound_upper: list of upper bounds for the parameters
+            - nbinsperday: number of bins per day (default is 96 as in openGUTS)
+        '''
         self.variant = variant
         self.ndatasets = len(survstruct)
         self.concstruct = concstruct
         self.datastruct = survstruct
         self.nbinsperday = nbinsperday
         self.timeext = []
-        self.index_commontime = [] #np.array([])
+        self.index_commontime = [] 
         for i in range(self.ndatasets):
             timeext, indexcommon = self.calc_ext_time(self.datastruct[i])
             self.timeext.append(timeext)
@@ -133,11 +186,19 @@ class GUTSmodels:
         self.parvals = np.array(parvals)
         self.islog = np.array(islog)                   # make sure these are numpy arrays	
         self.isfree = np.array(isfree)                 # make sure these are numpy arrays
-        self.posfree = np.argwhere(self.isfree == 1).flatten()
+        self.posfree = np.argwhere(self.isfree == 1).flatten()  # positions of the free parameters in the parameter vector
         self.parbound_lower = np.array(parbound_lower) # make sure these are numpy arrays
         self.parbound_upper = np.array(parbound_upper) # make sure these are numpy arrays
 
     def calc_ext_time(self, datastruct):
+        '''
+        Calculate the extended time vector and the indices of the common time points with the
+        original survival data.
+
+        Argument:
+        - datastruct : datastruct object
+            survival data structure
+        '''
         timeexttmp = []
         index_commontime = []
         for i in range(datastruct.ntreats):
@@ -153,6 +214,19 @@ class GUTSmodels:
         
 
     def calc_damage(self, kd, timeext, conctime, concdata, concslopes, constc):
+        '''
+        Calculate the damage variable using the concentration data. The function
+        can use a linear approximation of the concentration data or the analytical
+        solution for constant concentrations.
+
+        Arguments:
+        - kd: damage repair/elimination rate
+        - timeext: extended time vector
+        - conctime: time vector of the concentration data
+        - concdata: vector of concentration values
+        - concslopes: vector of slopes of the concentration data
+        - constc: boolean that specifies if the concentration is constant
+        '''
         if constc:
             damage = calc_damage_const(timeext, concdata[0], kd)
         else:
@@ -161,6 +235,19 @@ class GUTSmodels:
         return(damage)
 
     def calc_survival(self, timeext, concdata, damage, pars, consc):
+        '''
+        Calculate the survival probability for SD or IT variant (defined internally in the class).
+        The function can use the analytical solution for constant concentrations or the numerical
+        solution (for the SD case, the numerical solution uses the trapezium integration rule
+        valid here because the time step is small compared to the dynamic of the concentration).
+
+        Arguments:
+        - timeext: extended time vector
+        - concdata: vector of concentration values
+        - damage: vector of damage values
+        - pars: vector of parameter values
+        - consc: boolean that specifies if the concentration is constant
+        '''
         if self.variant == 'SD':
             if consc:
                 survival = calc_surv_sd_const(timeext,
@@ -173,6 +260,14 @@ class GUTSmodels:
         return(survival)
 
     def log_likelihood(self, theta, allpars, posfree):
+        '''
+        Calculate the log-likelihood of the GUTS model.
+
+        Arguments:
+        - theta: vector of free parameter values
+        - allpars: vector of all parameter values
+        - posfree: indices of the free parameters in the parameter vector
+        '''
         allpars[posfree] = theta
         # TODO: make sure that for each dataset the respective hb value is correctly passed
         modelpars = 10**allpars*self.islog + allpars*(1-self.islog)

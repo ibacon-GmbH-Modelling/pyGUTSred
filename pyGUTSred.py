@@ -146,16 +146,43 @@ def lcx_calculation(model, timepoints=[2,4,10,21], levels=[0.1,0.2,0.5], propaga
     return([LCx, LCxlo, LCxup])
 
 def plot_data_model(fit, datastruct, concstruct, model, propagationset, modellabel='model', add_obspred=True, savefig=False, figname='', extension='.png'):
-    '''
-    Function to plot data and/or model
-    Arguments:
-    ----------
-        fit = int
-            0 for data only, 1 for data and model, 2 for data, model,
-            and 95% confidence interval
-        modellabel : string
-            Customize model fit label (defualt "model")
-    '''
+    """
+    Function to plot experimental data, model predictions, and optionally confidence intervals.
+
+    Parameters:
+    -----------
+    fit : int
+        Specifies the type of plot:
+        - 0: Plot data only.
+        - 1: Plot data and model predictions.
+        - 2: Plot data, model predictions, and 95% confidence intervals.
+    datastruct : list
+        List of data structures, where each element contains survival data and related information for a dataset.
+    concstruct : list
+        List of concentration structures, where each element contains concentration data and related information for a dataset.
+    model : object
+        Model object containing methods for calculating damage and survival, as well as model parameters.
+    propagationset : list or None
+        List of parameter sets for propagating uncertainty to calculate confidence intervals. If None, confidence intervals are not plotted.
+    modellabel : str, optional
+        Label for the model predictions in the plot legend. Default is 'model'.
+    add_obspred : bool, optional
+        If True, generates additional plots comparing observed and predicted survival probabilities and deaths per interval. Default is True.
+    savefig : bool, optional
+        If True, saves the generated plots to files. Default is False.
+    figname : str, optional
+        Base filename for saving plots. Default is an empty string.
+    extension : str, optional
+        File extension for saving plots (e.g., '.png', '.jpg'). Default is '.png'.
+
+    Notes:
+    ------
+    - The function generates subplots for each treatment in the dataset, showing concentration over time and survival probabilities.
+    - If `fit > 0`, model predictions are plotted alongside the data.
+    - If `fit > 1` and `propagationset` is provided, 95% confidence intervals are calculated and plotted.
+    - Additional plots are generated if `add_obspred` is True, comparing observed and predicted values.
+    - The function supports saving plots to files if `savefig` is True.
+    """
     if fit in [0,1,2]:
         for nd in range(len(datastruct)):
             dataset = datastruct[nd]
@@ -253,6 +280,49 @@ def plot_data_model(fit, datastruct, concstruct, model, propagationset, modellab
         print("fit can be only 0 (data only), 1 (data and best fit), or 2 (data, best fit, and confidence interval)")
 
 def EFSA_quality_criteria(datastruct, concstruct, model):    
+    """
+    Evaluate the quality criteria defined by the EFSA (European Food Safety Authority)
+    Scientific Opinion on TKTD modelling (EFSA, 2018) 
+    based on the provided data structure, concentration structure, and model.
+    This function calculates various statistical metrics such as R², NRMSE, 
+    and SPPE to assess the performance of a survival model. It also prints 
+    detailed results for each dataset and treatment.
+    Parameters:
+    -----------
+    datastruct : list
+        A list of dataset objects, where each dataset contains survival 
+        probabilities, survival arrays, and other related data for different 
+        treatments.
+    concstruct : list
+        A list of concentration structure objects, where each object contains 
+        concentration arrays, slopes, constants, and other related data for 
+        different treatments.
+    model : object
+        A GUTSmodels object that contains parameters and methods for calculating 
+        damage and survival probabilities.
+    Returns:
+    --------
+    results : dict
+        A dictionary containing the following keys:
+        - 'R2': Coefficient of determination (R²) for the model fit.
+        - 'NRMSE': Normalized Root Mean Square Error (NRMSE) for the model fit.
+        - 'R2_0': R² including the t=0 point.
+        - 'NRMSE_0': NRMSE including the t=0 point.
+        - 'SPPE': Survival Probability Prediction Error (SPPE) for each treatment.
+    Notes:
+    ------
+    - The function assumes that the model parameters are either in log scale 
+      or linear scale, as indicated by the `islog` attribute of the model.
+    - The function prints detailed results for each dataset, including R², 
+      NRMSE, and SPPE values for each treatment.
+    - SPPE is calculated as the percentage difference between the observed 
+      and predicted survival probabilities at the last time point.
+    Example:
+    --------
+    >>> results = EFSA_quality_criteria(datastruct, concstruct, model)
+    >>> print(results['R2'])
+    >>> print(results['SPPE'])
+    """
     for nd in range(len(datastruct)):
         dataset = datastruct[nd]
         concset = concstruct[nd]
@@ -361,6 +431,60 @@ def _calculate_damage(args):
     return models.damage_linear_calc(par95_k, tlong, profile_time, profile_concarray, profile_concslopes)
 
 def lpx_calculation(profile, fitmodel, propagationset = None, lpxvals = [0.1,0.5], srange = [0.05, 0.999], len_srange = 50, plot = True, batch=False, savefig=False, figname="", extension='.png'):
+    """
+    Calculate LPx values and optionally generate plots of the survival probability
+    at the end of the profile as a function of the multiplication factor, and the
+    plot of the concentration profile and survival probability along the profile
+    for the calculated LPx values.
+    Parameters:
+    -----------
+    profile : conclass object
+        An object containing the time, concentration, and other profile-related 
+        data required for the calculation.
+    fitmodel : object
+        A GUTSmodels object containing parameters, bounds, and methods for calculating 
+        damage and survival.
+    propagationset : ndarray, optional
+        A set of parameter propagations for calculation of 95% CI. Default is None.
+    lpxvals : list of float, optional
+        List of LPx values (e.g., [0.1, 0.5]) to calculate. Default is [0.1, 0.5] 
+        corresponding to LP10 and LP50.
+    srange : list of float, optional
+        Range of survival probabilities for the calculation (e.g., [0.05, 0.999]). 
+        Default is [0.05, 0.999].
+    len_srange : int, optional
+        Number of points to sample within the survival probability range. 
+        Default is 50.
+    plot : bool, optional
+        Whether to generate plots for the results. Default is True.
+    batch : bool, optional
+        Whether the function is running in batch mode (it closes the plots
+        right after creation). 
+        Default is False.
+    savefig : bool, optional
+        Whether to save the generated plots to files. Default is False.
+    figname : str, optional
+        Base name for saving the figures if `savefig` is True. Default is an empty string.
+    extension : str, optional
+        File extension for saving the figures (e.g., '.png', '.pdf'). Default is '.png'.
+    Returns:
+    --------
+    ndarray
+        A 2D array of LPx values with shape (len(lpxvals), 3), where each row contains 
+        the LPx value, lower limit, and upper limit. If `len(lpxvals) == 1`, a flattened 
+        array is returned.
+    Notes:
+    ------
+    - The function supports two model variants: "IT" (Individual Tolerance) and "SD" 
+      (Stochastic Death). The calculations differ based on the model variant.
+    - If `propagationset` is provided, uncertainty bounds are calculated for LPx values.
+    - The function generates two types of plots:
+        1. Survival probability vs. multiplication factor.
+        2. Concentration profiles, damage, and survival probabilities for the required
+           LPx values.
+    - If `batch` is True, plots are closed after saving (if `savefig` is True).
+    - The function assumes there is only one treatment in the original profile file.
+    """
     def survfrac(MF, tvals, Dvals, pars, level):
         return(models.calc_surv_sd_trapz(tvals, MF*Dvals,pars)[-1] - (1-level))
     # impose 0 background mortality
@@ -564,6 +688,39 @@ def lpx_calculation(profile, fitmodel, propagationset = None, lpxvals = [0.1,0.5
 
 
 class concclass:
+    """
+    A class to handle concentration data, pre-calculate quantities needed for 
+    the GUTS model fits, and plotting of exposure data.
+    Attributes:
+        name (str): The name or origin of the data.
+        concdata (numpy.ndarray): The input concentration data array. The first column represents 
+            time, and the subsequent columns represent concentration values for different treatments.
+        ntreats (int): The number of treatments.
+        timetr (numpy.ndarray): Unmodified time vector extracted from the input data, used for plotting.
+        time (numpy.ndarray): The unique time values extracted from the input data.
+        concarraytr (numpy.ndarray): Array of concentrations at different time points for every treatment.
+        concslopestr (numpy.ndarray): Array to store the slopes of concentration changes over time 
+            for each treatment.
+        conctwa (numpy.ndarray): Array to store the time-weighted average concentration for each treatment.
+        concconst (numpy.ndarray): Array to indicate if a treatment has constant concentration (1) or not (0).
+        concmax (numpy.ndarray): Array to store the maximum concentration for each treatment.
+        concunits (str): The units of the concentration data.
+        concslopes (numpy.ndarray): Array of slopes of concentration changes over time, reshaped 
+            to match the number of treatments and unique time points.
+        concarray (numpy.ndarray): Array of concentration data, reshaped to match the number of 
+            treatments and unique time points.
+    Methods:
+        __init__(concdata, name, concunits):
+            Initializes the concclass object, processes the input data, interpolates missing values, 
+            calculates slopes, time-weighted averages, and other attributes.
+        plot_exposure(savefig=False, figname='', extension='.png'):
+            Plots the exposure data (concentration vs. time) for each treatment. Optionally saves 
+            the plot to a file.
+            Args:
+                savefig (bool): Whether to save the figure to a file. Default is False.
+                figname (str): The base name of the file to save the figure. Default is an empty string.
+                extension (str): The file extension for the saved figure. Default is '.png'.
+    """
     def __init__(self,concdata,name,concunits):
         self.name = name # to store the origin of the data
         self.concdata = concdata
@@ -633,14 +790,34 @@ class concclass:
 
 
 class dataclass:
+    """
+    A class to process and store survival data for multiple treatments.
+    Attributes:
+        survdata (numpy.ndarray): Input survival data matrix where the first column 
+            represents time and subsequent columns represent survival counts for 
+            different treatments.
+        ntreats (int): Number of treatments (columns in survdata excluding the time column).
+        time (numpy.ndarray): Array of time points extracted from the first column of survdata.
+        survarray (numpy.ndarray): Array of survival data (one row for each treatment).
+        survprobs (numpy.ndarray): Array to store survival probabilities for each treatment.
+        timetreat (list): List of time arrays for each treatment, excluding missing data.
+        survarrtreat (list): List of survival arrays for each treatment, excluding missing data.
+        deatharraytreat (list): List of death counts for each treatment.
+        survprobstreat (list): List of survival probabilities for each treatment.
+        lowlimtreat (list): List of lower confidence limits for each treatment.
+        upplimtreat (list): List of upper confidence limits for each treatment.
+    Methods:
+        __init__(survdata):
+            Initializes the dataclass object, processes the input survival data, 
+            and calculates survival probabilities and confidence intervals for 
+            each treatment. Handles missing data in the survival matrix.
+    """
     def __init__(self,survdata):
         self.survdata = survdata
         self.ntreats = survdata.shape[1] - 1
         self.time = survdata[:,0]
         self.survarray = np.transpose(survdata[:,1:])
         self.survprobs = np.zeros((self.ntreats,len(self.time)))
-        self.lowlim = np.zeros((self.ntreats,len(self.time)))
-        self.upplim = np.zeros((self.ntreats,len(self.time)))
         # this is needed to handle possibility of missing data in the
         # survival matrix
         self.timetreat = []
