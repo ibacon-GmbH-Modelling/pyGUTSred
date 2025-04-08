@@ -203,6 +203,10 @@ def plot_data_model(fit, datastruct, concstruct, model, propagationset, modellab
                                  yerr=[deltalow,deltaup], fmt='o',label='Survival')
                 ax[1,i].set_xlabel("Time [d]")
                 ax[1,i].set_ylim([0, nmax*1.1])
+                ax[0,i].set_xticklabels([]) # remove x tick labels from the first row
+                if i>0:
+                    ax[0,i].set_yticklabels([])
+                    ax[1,i].set_yticklabels([])
             ax[0,0].set_ylabel("Concentration [%s]"%concset.concunits)
             ax[1,0].set_ylabel("Survival")
             plt.tight_layout()
@@ -652,8 +656,11 @@ def lpx_calculation(profile, fitmodel, propagationset = None, lpxvals = [0.1,0.5
             ax2[0,i+1].fill_between(profile.timetr, LPx[i,0]*profile.concarraytr[0], label = "Conc",color='blue', alpha=0.2)
             ax2[0,i+1].plot(tlong, LPx[i,0]*damage1, 'k--')
             ax2[0,i+1].set_title("MF = %.2f"%LPx[i,0])
+            ax2[0,i+1].set_yticklabels([])
+            ax2[0,i+1].set_xticklabels([])
             surv = model.calc_survival(tlong, 0, LPx[i,0]*damage1, modelpars, 0)
             ax2[1,i+1].plot(tlong, surv, 'k-')
+            ax2[1,i+1].set_yticklabels([])
             ax2[1,i+1].set_ylim([0,1.1])
             ax2[1,i+1].set_xlabel("Time [d]")
             if propagationset is not None:
