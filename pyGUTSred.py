@@ -401,6 +401,9 @@ def validate(validationfile, fitmodel, propagationset, hbfix = True, plot = True
                                    bounds=[(model.parbound_lower[-1], model.parbound_upper[-1])])
             model.parvals[-1] = res.x
             print("hb fitted to control data: %.4f"%(model.parvals[-1]))
+        else:
+            model.parvals[-1] = 0
+            print("hb fixed to 0. For a fit of the background mortality to the control data use hbfix=True")
         print("Validation of model with %s variant"%model.variant)
         valres = EFSA_quality_criteria(np.array(valdata), np.array(valconc), model)
         if plot:

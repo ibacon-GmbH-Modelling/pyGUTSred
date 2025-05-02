@@ -789,19 +789,23 @@ class PyParspace:
         chicrit_rnd = chicrit_joint+crit_add #criterion for random mutations
         chicrit_max = max(1.2*chicrit_joint, chicrit_single+1.5) # criterion for, roughly, a 97.5% joint CI for pruning the sample
 
-        # Decided to skip regular grid and just use the latin hypercube all the times but using a regular grid (scamble=False)
+        # If number of parameters is below 5, we use regular grid, otherwise we go with teh latin hypercube
         n_tries = int(np.prod(tries_1))
-        if self.npars>=5:
-            n_tries=10000
-        sampler = qmc.LatinHypercube(d=self.npars, scramble=False) # dimension of the parameter space
-        sample = sampler.random(n=n_tries) 
         l_bounds = self.model.parbound_lower[self.posfree]
         u_bounds = self.model.parbound_upper[self.posfree]
-        # print("par bounds")
-        # print(l_bounds)
-        # print(u_bounds)
-        sample_scaled = qmc.scale(sample, l_bounds, u_bounds)
-    
+        if self.npars>=5:
+            n_tries=10000
+            sampler = qmc.LatinHypercube(d=self.npars) # dimension of the parameter space
+            sample = sampler.random(n=n_tries) 
+            sample_scaled = qmc.scale(sample, l_bounds, u_bounds)
+        else:
+            p_try = [np.linspace(np.array(lb),np.array(ub),tr) for (lb,ub,tr) in zip(l_bounds, u_bounds, tries_1.astype(int))]
+            # calculate all the possible combinations of the grid points
+            sample_scaled = np.array(np.meshgrid(*(p_try))).T.reshape(-1, self.npars)
+            # reshuffle all combinations
+            print(sample_scaled.shape)
+            np.random.shuffle(sample_scaled)
+        
         d_grid = (np.array(u_bounds)-np.array(l_bounds))/tries_1
         
         llog = np.zeros(sample_scaled.shape[0])
