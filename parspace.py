@@ -1,9 +1,12 @@
 '''
 Class for a paramter space explorer in python.
 
-This implementation is heavily based on the BYOM parameter space explorer code 
-written by Dr. Tjalling Jager. The original code is written in Matlab and can
-be found here: https://www.debtox.info/byom.html
+This implementation is heavily based on the BYOM and openGUTS parameter space 
+explorer code written by Dr. Tjalling Jager. The original code is written in 
+Matlab and can be found here: https://www.debtox.info/byom.html
+
+The original MATLAB files are located in the engine folder of openGUTS 
+or in the engine and engine_par folder of the BYOM release.
 
 The rewriting of this software made use of the GitHub Copilot, which is based
 on AI technology.
@@ -118,7 +121,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import qmc
 import multiprocessing as mp  # not used here, might become useful for more complex models
-from functools import partial
 import scipy.optimize as optim
 
 import psutil
@@ -769,6 +771,7 @@ class PyParspace:
         plt.show()
         if savefig:
             plt.savefig(figbasename+"_"+self.model.variant+extension)
+            plt.close()
 
     # Run the paramter space explorer with the given options defined in the 
     # intialization of the class

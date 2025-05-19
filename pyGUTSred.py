@@ -139,7 +139,7 @@ def lcx_calculation(model, timepoints=[2,4,10,21], levels=[0.1,0.2,0.5], propaga
         titlestring = titlestring + "LC{:<32}".format(round(levels[i]*100))
     print(titlestring)
     for i in range(len(timepoints)):
-        values = "{:<10d}".format(timepoints[i])
+        values = "{:<10s}".format(str(timepoints[i]))
         for j in range(len(levels)):
             values = values + "{:<7.3g} ({:<7.3g} - {:<7.3g})       ".format(LCx[i,j], LCxlo[i,j], LCxup[i,j])
         print(values)
@@ -278,8 +278,10 @@ def plot_data_model(fit, datastruct, concstruct, model, propagationset, modellab
             plt.show()
             if savefig:
                 fig.savefig(figname+"_"+model.variant+"_dataset%d"%(nd+1)+extension)
+                plt.close()
                 if add_obspred:
                     fig2.savefig(figname+"_"+model.variant+"_dataset%d_obs_pred"%(nd+1)+extension)
+                    plt.close()
     else:
         print("fit can be only 0 (data only), 1 (data and best fit), or 2 (data, best fit, and confidence interval)")
 
