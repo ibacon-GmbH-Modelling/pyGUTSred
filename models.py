@@ -2,7 +2,7 @@ import numpy as np
 from numba import jit
 import scipy.integrate as spi
 
-@jit(nopython=1)
+@jit(nopython=True)
 def damage_calculation(y,t,C,timextr,kd):
     # this could be made similar to what BYOM does without 
     # having to solve the ODE
@@ -11,7 +11,7 @@ def damage_calculation(y,t,C,timextr,kd):
     dydt = kd*(Cval-y[0])
     return(dydt)
 
-@jit(nopython=1)
+@jit(nopython=True)
 def damage_linear_calc(kd, timeext, timeconc, conc, slopes):
     '''
     Calculate the damage variable using a linear approximation of 
@@ -40,12 +40,12 @@ def damage_linear_calc(kd, timeext, timeconc, conc, slopes):
         Dw0   = slope * t_end + c_start - slope / kd + np.exp(-kd * t_end) * (Dw0 - c_start + slope / kd)
     return(damage)
 
-@jit(nopython=1)
+@jit(nopython=True)
 def calc_damage_const(t,C,kd):
     damage = C*(1-np.exp(-kd*t))
     return(damage)
 
-@jit(nopython=1)
+@jit(nopython=True)
 def calc_survival_SD(y,t,D,pars):
     bw,zw,hb=pars
     dydt = 0
@@ -56,12 +56,12 @@ def calc_survival_SD(y,t,D,pars):
 def calc_surv_sd_trapz(tvals, Dvals,pars):
     bw,zw,hb=pars
     hz = bw*(np.maximum(Dvals-zw,0))
-    hzcum = spi.cumtrapz(hz, tvals, initial=0)
+    hzcum = spi.cumulative_trapezoid(hz, tvals, initial=0)
     Sc = np.minimum(1,np.exp(-hzcum))
     Sc = Sc * np.exp(-hb*tvals)
     return(Sc)
 
-@jit(nopython=1)
+@jit(nopython=True)
 def calc_surv_sd_const(tvals,Cvals,pars):
     kd,bw,zw,hb=pars
     minH = np.zeros_like(tvals)
@@ -74,7 +74,7 @@ def calc_surv_sd_const(tvals,Cvals,pars):
     Sc = Sc * np.exp(-hb*tvals)
     return(Sc)
 
-@jit(nopython=1)
+@jit(nopython=True)
 def guts_sdmodel(y,t,C,timextr,pars):
     Cval = np.interp(t, timextr,C)
     kd,bw,zw,hb=pars
@@ -83,7 +83,7 @@ def guts_sdmodel(y,t,C,timextr,pars):
     dydt[1] = -(bw*max(y[0]-zw,0)+hb)*y[1]
     return(dydt)
     
-@jit(nopython=1)
+@jit(nopython=True)
 def guts_itmodel(tvals, Dvals,pars):
     Fs,mw,hb=pars
     beta = np.log(39)/np.log(Fs)
@@ -101,7 +101,7 @@ def guts_itmodel(tvals, Dvals,pars):
     Sc = Sc * np.exp(-hb*tvals)
     return(Sc)
 
-@jit(nopython=1)
+@jit(nopython=True)
 def hb_fit_ll(hb, tvals, deathcontroldata):
     survmodelcontrol = np.exp(-hb*tvals)
     pdeath = np.append(-np.diff(survmodelcontrol),survmodelcontrol[-1])
@@ -109,7 +109,7 @@ def hb_fit_ll(hb, tvals, deathcontroldata):
     llik=np.dot(deathcontroldata,np.log(pdeath))
     return(-llik)
 
-@jit(nopython=1)
+@jit(nopython=True)
 def loglikelihood(modelvector, commontime, deathvector):
     surviv_selected = modelvector[commontime]
     #print(surviv_selected)

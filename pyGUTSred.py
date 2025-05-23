@@ -439,7 +439,7 @@ def _calculate_damage(args):
     par95_k, tlong, profile_time, profile_concarray, profile_concslopes = args
     return models.damage_linear_calc(par95_k, tlong, profile_time, profile_concarray, profile_concslopes)
 
-def lpx_calculation(profile, fitmodel, propagationset = None, lpxvals = [0.1,0.5], srange = [0.05, 0.999], len_srange = 50, plot = True, batch=False, savefig=False, figname="", extension='.png'):
+def lpx_calculation(profile, fitmodel, propagationset = None, subset=0, lpxvals = [0.1,0.5], srange = [0.05, 0.999], len_srange = 50, plot = True, batch=False, savefig=False, figname="", extension='.png'):
     """
     Calculate LPx values and optionally generate plots of the survival probability
     at the end of the profile as a function of the multiplication factor, and the
@@ -455,6 +455,9 @@ def lpx_calculation(profile, fitmodel, propagationset = None, lpxvals = [0.1,0.5
         damage and survival.
     propagationset : ndarray, optional
         A set of parameter propagations for calculation of 95% CI. Default is None.
+    subset : int, optional
+        Number of random element of the propagationset to use for the calculation.
+        Default is 0, which means all elements are used. Useful for quick checks.
     lpxvals : list of float, optional
         List of LPx values (e.g., [0.1, 0.5]) to calculate. Default is [0.1, 0.5] 
         corresponding to LP10 and LP50.
@@ -534,6 +537,13 @@ def lpx_calculation(profile, fitmodel, propagationset = None, lpxvals = [0.1,0.5
                                     damage1, modelpars,
                                     profile.concconst[0])
     if propagationset is not None:
+        if subset > 0:
+            if subset > len(propagationset):
+                print("Subset is larger than the propagationset. Using the whole set.")
+                subset = len(propagationset)
+            propagationset = np.copy(propagationset)
+            np.random.shuffle(propagationset)
+            propagationset = propagationset[:subset,:]
         par95 = np.copy(model.parvals)
         par95 = np.expand_dims(par95, axis = 0)
         par95 = np.repeat(par95, len(propagationset), axis=0)
