@@ -439,7 +439,7 @@ def _calculate_damage(args):
     par95_k, tlong, profile_time, profile_concarray, profile_concslopes = args
     return models.damage_linear_calc(par95_k, tlong, profile_time, profile_concarray, profile_concslopes)
 
-def lpx_calculation(profile, fitmodel, propagationset = None, subset=0, lpxvals = [0.1,0.5], srange = [0.05, 0.999], len_srange = 50, plot = True, batch=False, savefig=False, figname="", extension='.png'):
+def lpx_calculation(profile, fitmodel, propagationset = None, subset=0, lpxvals = [0.1,0.5], srange = [0.05, 0.999], len_srange = 50, plot = True, batchmode=False, savefig=False, figname="", extension='.png'):
     """
     Calculate LPx values and optionally generate plots of the survival probability
     at the end of the profile as a function of the multiplication factor, and the
@@ -469,7 +469,7 @@ def lpx_calculation(profile, fitmodel, propagationset = None, subset=0, lpxvals 
         Default is 50.
     plot : bool, optional
         Whether to generate plots for the results. Default is True.
-    batch : bool, optional
+    batchmode : bool, optional
         Whether the function is running in batch mode (it closes the plots
         right after creation). 
         Default is False.
@@ -686,7 +686,7 @@ def lpx_calculation(profile, fitmodel, propagationset = None, subset=0, lpxvals 
                 survmax = np.max(survk, axis=0)
                 ax2[1,i+1].fill_between(tlong,survmin,survmax, color = 'k',alpha= 0.2)
         plt.tight_layout()
-    if batch:
+    if batchmode:
         plt.close(fig)
         plt.close(fig2)
         if savefig:
@@ -939,7 +939,11 @@ class pyGUTSred(parspace.PyParspace):
         print("setup the parameter space explorer")
         self.parspacesetup = parspace.SettingParspace(rough=rough,profile=profile)
         super().__init__(self.parspacesetup,self.model)
-        self.plot_data_model(fit=0)
+        # commented out, can be helpful for checking the data
+        # however, it could probably be done outside the initialization,
+        # so that the user can decide whether to plot or not, or just go in
+        # batchmode
+        # self.plot_data_model(fit=0) 
 
     def _preset_pars(self):
         self.isfree = np.concatenate(([1,1,1],[0]*self.ndatasets)) # last positions are for the hb values
