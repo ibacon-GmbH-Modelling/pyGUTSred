@@ -5,5 +5,5 @@ import pyGUTSred as pg
 if __name__ == '__main__':
 
     SDfit = pg.pyGUTSred(["./datasets/setsfromopenguts/diazinon_gammarus.txt"], "SD", hbfree=True)
-    SDfit.run_and_time_parspace()
+    SDfit.run_and_time_parspace(batchmode=False,savefig=False)
     SDfit.plot_data_model(fit=2)

@@ -698,7 +698,7 @@ class PyParspace:
 
     # "private" method function that generates the figure with the sampling of 
     # the parameter space explorer includes arguments to save the resulting figure
-    def _plot_samples(self,profile=None, savefig=False, figbasename="", extension=".png"):
+    def _plot_samples(self,profile=None, batchmode= False, savefig=False, figbasename="", extension=".png"):
         '''
         Plot the results of the parameter space explorer
         Arguments:
@@ -768,20 +768,24 @@ class PyParspace:
                 j+=1
         plt.figlegend(handles, labels, loc='upper right')
         plt.tight_layout()
-        plt.show()
-        if savefig:
-            plt.savefig(figbasename+"_"+self.model.variant+extension)
+        if batchmode==False:
+            plt.show()
+            if savefig:
+                plt.savefig(figbasename+"_"+self.model.variant+extension)
+        else:
+            if savefig:
+                plt.savefig(figbasename+"_"+self.model.variant+extension)
             plt.close()
 
     # Run the paramter space explorer with the given options defined in the 
     # intialization of the class
-    def run_parspace(self):
+    def run_parspace(self, batchmode=True, savefig=False,figbasename="fit",extension=".png"):
         crit_add = self.opts.crit_add
         n_tr = self.opts.n_tr
         f_d = self.opts.f_d
         n_ok = self.opts.n_ok[self.npars-1]
         n_conf = self.opts.n_conf_all[self.npars-1]
-        #tries_1 = self.opts.tries[self.posfree] # * np.ones((1,self.npars)) #add support for multiple hb values
+        # support for multiple hb values (because of multiple datasets)
         tries_1 = np.concatenate((self.opts.tries, [self.opts.tries[-1]]*(self.model.ndatasets-1)))
         tries_1 = tries_1[self.posfree]
         n_max = self.opts.n_max
@@ -792,7 +796,7 @@ class PyParspace:
         chicrit_rnd = chicrit_joint+crit_add #criterion for random mutations
         chicrit_max = max(1.2*chicrit_joint, chicrit_single+1.5) # criterion for, roughly, a 97.5% joint CI for pruning the sample
 
-        # If number of parameters is below 5, we use regular grid, otherwise we go with teh latin hypercube
+        # If number of parameters is below 5, we use regular grid, otherwise we go with the latin hypercube
         n_tries = int(np.prod(tries_1))
         l_bounds = self.model.parbound_lower[self.posfree]
         u_bounds = self.model.parbound_upper[self.posfree]
@@ -806,9 +810,9 @@ class PyParspace:
             # calculate all the possible combinations of the grid points
             sample_scaled = np.array(np.meshgrid(*(p_try))).T.reshape(-1, self.npars)
             # reshuffle all combinations
-            print(sample_scaled.shape)
             np.random.shuffle(sample_scaled)
         
+        print(['Starting round ',1,' Initial run with ',n_tries,' parameter sets'])
         d_grid = (np.array(u_bounds)-np.array(l_bounds))/tries_1
         
         llog = np.zeros(sample_scaled.shape[0])
@@ -816,12 +820,12 @@ class PyParspace:
         sortind = np.argsort(llog)
     
         # sorted list of paramters
-        coll_all = sample_scaled[sortind]
-        coll_allL = llog[sortind]
-        mll = coll_allL[0]
+        coll_all = sample_scaled[sortind]   # paramter vectors
+        coll_allL = llog[sortind]           # corresponding likelihood values
+        mll = coll_allL[0]                  # best likelihood
     
         ind_cont = np.argwhere(coll_allL < mll+chicrit_rnd[0]).flatten().max()
-        ind_cont = max(ind_cont, n_ok)
+        ind_cont = max(ind_cont, n_ok) # take at least n_ok points for the next iteration
     
         coll_ok = coll_all[0:ind_cont,:]
         coll_okL = coll_allL[0:ind_cont]
@@ -847,7 +851,6 @@ class PyParspace:
                 n_tr_i = np.floor(n_tr_i/2)
         n_tr_i = min(n_tr_i,max(2,np.floor(10*n_conf[0]/ind_cont)))
 
-        # Add here plotting method for the results so far
         flag_stop = False
         flag_inner = 0
         while flag_stop == False:
@@ -867,6 +870,7 @@ class PyParspace:
     
             mll = coll_allL[0]
     
+            # check numbers of sets in the joint and inner rims
             ind_final = np.argwhere(coll_allL < coll_allL[0]+chicrit_joint).flatten().max()
             ind_single = np.argwhere(coll_allL < coll_allL[0]+chicrit_single).flatten().max()
             ind_cont_t = np.argwhere(coll_triesL < coll_triesL[0]+chicrit_i).flatten().max()
@@ -878,7 +882,7 @@ class PyParspace:
     
             print('  Status: ',ind_final,' sets within total CI and ',ind_single,' within inner. Best fit: %.4f'%coll_allL[0])   
 
-            ## Insert slow kinetic check here
+            ## GUTS only. Check for slow kinetic
             if ((((self.model.isfree[0]==1) & (self.model.isfree[2]==1)) & ((self.model.islog[2]==0) & (self.model.islog[0]==1))) & ((self.model.parbound_upper[2]/self.model.parbound_lower[2]) > 10)):                
                 coll_tst = coll_all[:max(ind_final,n_ok),:]
                 min_mw = min(coll_tst[:,2])
@@ -894,11 +898,10 @@ class PyParspace:
                         slwkin = -1
                         return (slwkin,lowerv,upperv)
     
-            if ind_final > n_conf[0]:
-                if ind_single > n_conf[1]:
+            if ind_final > n_conf[0]:      # checking if the outer rim has enough values (see options)
+                if ind_single > n_conf[1]: # checking if the inner rim has enough values (see options)
                     print('  Stopping criterion met: ',ind_final,' sets within total CI and ',ind_single,' within inner')
                     flag_stop = True
-                    #break
                 else:
                     print("Next round will be focussed on the inner rim (outer rim has enough values)")
                     coll_ok = coll_all[0:ind_inner]
@@ -948,10 +951,9 @@ class PyParspace:
                         coll_okL = coll_allL[0:n_ok]
     
             if (n_rnd == n_max) & (flag_stop == False):
+                # the loop stops anyway here as maximum number of tries is reached
                 flag_stop = True
                 print('  Stopping criterion not met after ',n_rnd,' rounds')
-                #break
-    
             n_rnd = n_rnd + 1
             if n_rnd <= len(n_tr):
                 n_tr_i = n_tr[n_rnd-1]
@@ -986,13 +988,12 @@ class PyParspace:
             # two parameter vectors that are different, but that have the same likelihood
             # so first we check if there are parameter duplicates and remove them
             # only if they are really the same (so if the sum of the mask is equal to the number of parameters)
-            # This requires some more testing becuase with a dose-response function it is difficult to
-            # have duplicates
-            ## in the openGUTS code the duplicate check is not present
-            # mask = np.sum(coll_all[1:]==coll_all[:-1], axis=1)
-            # coll_all = np.append([coll_all[0]], coll_all[1:,:][mask!=self.npars], axis=0)
-            # coll_allL = np.append(coll_allL[0], coll_allL[1:][mask!=self.npars])
-            # print("Removed ", sum(mask), " duplicate values")
+            # This might require some more testing
+            # in the openGUTS code the duplicate check is not present, but it is there in BYOM
+            mask = np.sum(coll_all[1:]==coll_all[:-1], axis=1)
+            coll_all = np.append([coll_all[0]], coll_all[1:,:][mask!=self.npars], axis=0)
+            coll_allL = np.append(coll_allL[0], coll_allL[1:][mask!=self.npars])
+            print("Removed ", sum(mask), " duplicate values")
         print('Loop is over')
     
         # perform now a simplex optimization
@@ -1016,13 +1017,15 @@ class PyParspace:
             self.fullset = np.copy(self.model.parvals)
             print("Final results:")
             self._print_results()
-            self._plot_samples()    
+            self._plot_samples(batchmode=batchmode,savefig=savefig,
+                               figbasename=figbasename,
+                               extension=extension)    
             # have a return statement here
         else:
             # perform a profile likelihood to determine the confidence intervals
-            n_rnd = n_rnd+1
+            # n_rnd = n_rnd+1
             print("Starting round ",n_rnd," for profile likelihood of each parameter")
-            parprofile=[0]*4
+            parprofile=[0]*n_cores
             pbest = np.zeros((self.npars,self.npars+1))
             # TESTING PROFILING WITH REDUCED SAMPLE. REMOVE AFTER TESTING
             # self.coll_all = np.copy(self.coll_all[np.unique(np.sort(np.random.randint(0,len(coll_allL),500)))])
@@ -1068,7 +1071,6 @@ class PyParspace:
                     print("Profiling has detected gaps between profile and sample, which requires extra sampling rounds.")
                 while (self.coll_ok.shape[0]>0) & (n_rnd_x < 10):
                     n_cont = self.coll_ok.shape[0]
-                    r_rnd = n_rnd+1
                     n_rnd_x = n_rnd_x+1
 
                     n_tr_i = 40
@@ -1143,7 +1145,10 @@ class PyParspace:
             self.fullset = np.copy(self.model.parvals)
             self.bestaic = 2*self.pbest[-1]+2*self.npars
 
-            self._plot_samples(parprofile)
+            self._plot_samples(parprofile,batchmode=batchmode,
+                               savefig=savefig,
+                               figbasename=figbasename,
+                               extension=extension)
             self.profile = parprofile
             self._print_results(self.profile)
             
@@ -1152,13 +1157,16 @@ class PyParspace:
             self.propagationset = self.coll_all[ind_prop1:ind_prop2,:-1]
         return (0,0,0)
     
-    def replot_results(self, savefig=False, figbasename="", extension=".png"):
+    def replot_results(self, batchmode=False, savefig=False, figbasename="", extension=".png"):
         """
         Function to reproduce the parameter
         space plot calling the function _plot_samples
         
         Arguments
         ---------
+        bacthmode : bool
+            flag to run the plotting in batch mode
+            (no plotting shown on screen)
         savefig : bool
             flag to save the figure
         figbasename : string
@@ -1167,9 +1175,9 @@ class PyParspace:
             extension of the figure
         """
         if self.profile:
-            self._plot_samples(profile=self.profile, savefig=savefig, figbasename=figbasename, extension=extension)
+            self._plot_samples(profile=self.profile, batchmode=batchmode, savefig=savefig, figbasename=figbasename, extension=extension)
         else:
-            self._plot_samples(savefig=savefig, figbasename=figbasename, extension=extension)
+            self._plot_samples(savefig=savefig, batchmode=batchmode, figbasename=figbasename, extension=extension)
         
     def reprint_results(self):
         """

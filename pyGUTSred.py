@@ -1002,11 +1002,11 @@ class pyGUTSred(parspace.PyParspace):
             self.parvals[2+(i+1)] = res.x
             print("hb fitted to control data for dataset %d: %.4f"%(i+1,self.parvals[2+(i+1)]))
 
-    def run_and_time_parspace(self):
+    def run_and_time_parspace(self,batchmode=True,savefig=False,figbasename="fit",extension=".png"):
         # wrapper around the parameter space explorer so that
         # we can include meausures in case there is slow kinetic
         start = time.time()
-        out = self.run_parspace()
+        out = self.run_parspace(batchmode=batchmode,savefig=savefig,figbasename=figbasename,extension=extension)
         if out[0]==-1:
             print("slow kinetic was detected")
             print("threshold parameter will be explored in logarithmic scale")
@@ -1019,7 +1019,7 @@ class pyGUTSred(parspace.PyParspace):
             self.model.parbound_lower[2] = np.log10(self.model.parbound_lower[2])
             # update boundary for kd
             # self.model.parbound_upper[0] = min(self.model.parbound_upper[0],out[2][self.model.posfree==0]*self.opts.slowkin_f_kd)
-            out = self.run_parspace()
+            out = self.run_parspace(batchmode=batchmode,savefig=savefig,figbasename=figbasename,extension=extension)
         stop = time.time()
         print("Elapsed time for the parameter space exploration: %.4f"%(stop-start))
 
