@@ -648,7 +648,7 @@ class PyParspace:
                     else:
                         ind_low = np.argwhere(prof_tst[:,-1] < 0).flatten().min()
                         if ind_low.size > 0:
-                            val=np.interp(0, prof_tst[ind_low-1:ind_low+1,-1], prof_tst[ind_low-1:ind_low+1,i])
+                            val=np.interp(0, prof_tst[ind_low-1:ind_low,-1], prof_tst[ind_low-1:ind_low,i])
                             res_parspace[i,1] = (10**val*self.model.islog[self.posfree[i]] + 
                                                  val*(1-self.model.islog[self.posfree[i]]))
                     if prof_tst[-1,-1] < 0:
@@ -658,8 +658,8 @@ class PyParspace:
                     else:
                         ind_up = np.argwhere(prof_tst[:,-1] < 0).flatten().max()
                         if ind_up.size > 0:
-                            val = np.interp(0, prof_tst[ind_up-1:ind_up+1,-1],
-                                            prof_tst[ind_up-1:ind_up+1,i])
+                            val = np.interp(0, prof_tst[ind_up:ind_up+1,-1],
+                                            prof_tst[ind_up:ind_up+1,i])
                             res_parspace[i,2] = (10**(val)*self.model.islog[self.posfree[i]] +
                                                      (val)*(1-self.model.islog[self.posfree[i]]))
                     num_x = np.sum(np.diff(np.sign(prof_tst[:,-1]))!=0)
