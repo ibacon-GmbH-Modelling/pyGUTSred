@@ -18,7 +18,15 @@ The code relies on the following files:
 * parspace.py
 * pyGUTSred.py
 
-Place them either in your working directory or in a different folder that is added to your `PYTHONPATH` as in the following
+The file `models.py` contains all the specific functions related to the GUTS model and the likelihood calculations
+given a dataset and model parameters
+
+The file `parspace.py` contains the parameter space explorer algorithm adapted for the GUTS model
+
+The file `pyGUTSred.py` contains the all the general framework and additional functions to run a complete GUTS modelling
+analysis.
+
+Place the three files either in your working directory or in a different folder that is added to your `PYTHONPATH` as in the following
 
 ```python
 import sys
@@ -27,4 +35,4 @@ sys.path.append('/path/to/your/folder/with/the/pygutsred/scripts')
 
 For a basic usage see the script `example_run.py`, while for a more detailed view of all the main functionalities, look at the jupyter notebook `use_example.ipynb`
 
-(**NOTE**: the example script run under the assumption that they are placed in the same directory as the 3 source files)
+(**NOTE**: the example script runs under the assumption that they are placed in the same directory as the 3 source files)
