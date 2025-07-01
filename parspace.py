@@ -120,7 +120,7 @@ Copyright (c) 2003-2024 Matplotlib Development Team
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import qmc
-import multiprocessing as mp  # not used here, might become useful for more complex models
+import multiprocessing as mp  
 import scipy.optimize as optim
 
 import psutil
