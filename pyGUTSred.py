@@ -14,6 +14,39 @@ import psutil
 n_cores = psutil.cpu_count(logical=False)
 
 def readfile(filepath):
+    """
+    Read a file containing survival and concentration data.
+    The file should contain lines with survival times and concentration units.
+    The function extracts survival data and concentration data, returning them
+    as two separate pandas DataFrames.
+    The format of the file should be the same as in openGUTS.
+
+    Example of file format (from openGUTS: ringtest_A_SD.txt):
+    Data set A for the GUTS ring test. Hypothetical data set constructed with SD.
+    Survival time [d]	Control	T1	T2	T3	T4	T5
+    0	20	20	20	20	20	20
+    1	20	20	20	20	18	5
+    2	20	20	19	11	4	0
+    3	20	20	15	2	1	0
+    4	19	20	11	0	0	0
+    5	19	20	5	0	0	0
+    6	18	20	3	0	0	0
+    Concentration unit:	uM					
+    Concentration time [d]	Control	T1	T2	T3	T4	T5
+    0	0	2	4	6	8	16
+    6	0	2	4	6	8	16
+
+    Parameters:
+    -----------
+    filepath : str
+        Path to the file containing survival and concentration data.
+    Returns:
+    --------
+    tuple
+        A tuple containing:
+        - concclass object with concentration data.
+        - dataclass object with survival data.
+    """
     with open(filepath, 'r') as f:
         lines = f.readlines()
     startp =0
@@ -47,18 +80,68 @@ def readfile(filepath):
     return((concclass(np.array(concdata),filepath,concunits), dataclass(np.array(survdata))))
 
 def readprofile(filepath, units=''):
-    # this function assumes that the file is
-    # simply 2 columns, one with the time
-    # and the other with the concentration
-    # the user can provide optionally the
-    # units
-    # TODO: make sure that the profile has the same units as the
-    #       model calibration
+    """
+    Read a concentration profile from a file and return it as a concclass object.
+    The file should contain two columns: time and concentration.
+    Parameters:
+    -----------
+    filepath : str
+        Path to the file containing the concentration profile data.
+    units : str, optional
+        Units of the concentration data (e.g., 'uM', 'mg/L'). Default is an empty string.
+    Returns:
+    --------
+    concclass object
+        An object containing the concentration profile data, time, and units.
+    Note:
+    -----
+    this function assumes that the file is
+    simply 2 columns, one with the time
+    and the other with the concentration
+    the user can provide optionally the
+    units
+    TODO: make sure that the profile has the same units as the
+          model calibration
+    """
     table = pd.read_csv(filepath,  sep='\s+', header =None)
     table = table.apply(pd.to_numeric, errors='coerce')
     return(concclass(np.array(table.astype(float)), filepath, units))
 
 def lcx_calculation(model, timepoints=[2,4,10,21], levels=[0.1,0.2,0.5], propagationset=None, plot=False, concunits="", savefig=False, figname='', extension='.png'):
+    """
+    Calculate LCx (Lethal concentrations for X% level of effect) values for the given model at specified time points and survival levels
+    assuming constant exposure.
+
+    Parameters:
+    -----------
+    model : object
+        A models object containing parameters and methods for calculating survival (e.g. pyGUTSred_object.model).
+    timepoints : list of float, optional
+        List of time points (in days) at which to calculate LCx values. Default is [2, 4, 10, 21] days.
+    levels : list of float, optional
+        List of mortality levels (between 0 and 1) for which to calculate LCx values. Default is [0.1, 0.2, 0.5]
+        (corresponding to 10%,20%,50% mortality at the end of the timepoints defined in 'timepoints').
+    propagationset : ndarray, optional
+        A set of parameters for calculating 95% confidence intervals. 
+        Default is None. (pyGUTSred_object.propagationset)
+    plot : bool, optional
+        Whether to generate plots of the LCx values. Default is False.
+    concunits : str, optional
+        Units for the concentration values in the plot. Default is an empty string.
+    savefig : bool, optional    
+        Whether to save the generated plots to files. Default is False.
+    figname : str, optional
+        Base name for saving the figures if `savefig` is True. Default is an empty string.
+    extension : str, optional
+        File extension for saving the figures (e.g., '.png', '.pdf'). Default is '.png'.
+    Returns:
+    --------
+    tuple
+        A tuple containing three arrays:
+        - LCx values for each time point and survival level.
+        - Lower limits of LCx values for each time point and survival level.
+        - Upper limits of LCx values for each time point and survival level.
+    """
     # the calculation of LCx values assumes always that the 
     # exposure is constant
     def survfrac(conc,timevector,modelpars,level):
@@ -293,6 +376,7 @@ def EFSA_quality_criteria(datastruct, concstruct, model):
     This function calculates various statistical metrics such as R², NRMSE, 
     and SPPE to assess the performance of a survival model. It also prints 
     detailed results for each dataset and treatment.
+
     Parameters:
     -----------
     datastruct : list
@@ -383,43 +467,85 @@ def EFSA_quality_criteria(datastruct, concstruct, model):
     return(results)
 
 def validate(validationfile, fitmodel, propagationset, hbfix = True, plot = True, savefig=False, figname='', extension='.png'):
-        tmp = readfile(validationfile)
-        valconc = np.array([])
-        valdata = np.array([])
-        valconc = np.append(valconc,tmp[0])
-        valdata = np.append(valdata,tmp[1])        
-        model = deepcopy(fitmodel)
-        valdata[0].timeext, valdata[0].index_commontime = model.calc_ext_time(valdata[0])
-        model.parvals = model.parvals[:4]
-        model.islog = model.islog[:4]
-        model.islog[-1] = 0 # always force the 
-        model.parbound_lower = model.parbound_lower[:4]
-        model.parbound_upper = model.parbound_upper[:4]
-        if hbfix:
-            res = sp.optimize.minimize(models.hb_fit_ll, 
-                                   x0=model.parvals[-1], 
-                                   args=(valdata[0].timetreat[0],valdata[0].deatharraytreat[0]),
-                                   method='Nelder-Mead',
-                                   bounds=[(model.parbound_lower[-1], model.parbound_upper[-1])])
-            model.parvals[-1] = res.x
-            print("hb fitted to control data: %.4f"%(model.parvals[-1]))
+    """
+    Validate the model using a separate validation dataset and the fitted model parameters.
+    This function reads the validation data, applies the fitted model to it, and calculates
+    the EFSA quality criteria for the validation data. It also generates plots of the
+    validation data, model predictions, and optionally confidence intervals.
+    Parameters:
+    -----------
+    validationfile : str
+        Path to the validation file containing survival and concentration data.
+    fitmodel : object
+        A GUTSmodels object containing the fitted model parameters and methods for calculating survival and damage.
+    propagationset : ndarray
+        A set of parameter propagations for calculating 95% confidence intervals. If None, confidence intervals are not calculated.
+    hbfix : bool, optional
+        If True, the background mortality is fitted to the control data in the validation file.
+        If False, it is fixed to 0. Default is True.
+    plot : bool, optional
+        Whether to generate plots of the validation data and model predictions. Default is True.
+    savefig : bool, optional
+        Whether to save the generated plots to files. Default is False.
+    figname : str, optional
+        Base name for saving the figures if `savefig` is True. Default is an empty string.
+    extension : str, optional
+        File extension for saving the figures (e.g., '.png', '.pdf'). Default is '.png'.
+    Returns:
+    --------
+    valres : dict
+        A dictionary containing the EFSA quality criteria results for the validation data, including R², NRMSE, and SPPE.
+    Notes:
+    ------
+    - The function reads the validation data from the specified file and extracts survival and concentration data.
+    - It applies the fitted model to the validation data, calculates the survival probabilities, and evaluates the model's performance using EFSA quality criteria.
+    - If `hbfix` is True, the background mortality is fitted to the control data in the validation file.
+    - If `plot` is True, the function generates plots of the validation data, model predictions, and confidence intervals if `propagationset` is provided.
+    - The function prints detailed results for the validation data, including R², NRMSE, and SPPE values for each treatment.
+    """
+    tmp = readfile(validationfile)
+    valconc = np.array([])
+    valdata = np.array([])
+    valconc = np.append(valconc,tmp[0])
+    valdata = np.append(valdata,tmp[1])        
+    model = deepcopy(fitmodel)  # use of deepcopy to avoid modifying the original model
+    valdata[0].timeext, valdata[0].index_commontime = model.calc_ext_time(valdata[0])
+    model.parvals = model.parvals[:4]
+    model.islog = model.islog[:4]
+    model.islog[-1] = 0 # always force the 
+    model.parbound_lower = model.parbound_lower[:4]
+    model.parbound_upper = model.parbound_upper[:4]
+    if hbfix:
+        res = sp.optimize.minimize(models.hb_fit_ll, 
+                               x0=model.parvals[-1], 
+                               args=(valdata[0].timetreat[0],valdata[0].deatharraytreat[0]),
+                               method='Nelder-Mead',
+                               bounds=[(model.parbound_lower[-1], model.parbound_upper[-1])])
+        model.parvals[-1] = res.x
+        print("hb fitted to control data: %.4f"%(model.parvals[-1]))
+    else:
+        model.parvals[-1] = 0
+        print("hb fixed to 0. For a fit of the background mortality to the control data use hbfix=True")
+    print("Validation of model with %s variant"%model.variant)
+    valres = EFSA_quality_criteria(np.array(valdata), np.array(valconc), model)
+    if plot:
+        if propagationset is None:
+            plot_data_model(fit =1,datastruct=valdata,concstruct=valconc,model=model,propagationset=None, savefig=savefig, figname=figname, extension=extension)
         else:
-            model.parvals[-1] = 0
-            print("hb fixed to 0. For a fit of the background mortality to the control data use hbfix=True")
-        print("Validation of model with %s variant"%model.variant)
-        valres = EFSA_quality_criteria(np.array(valdata), np.array(valconc), model)
-        if plot:
-            if propagationset is None:
-                plot_data_model(fit =1,datastruct=valdata,concstruct=valconc,model=model,propagationset=None, savefig=savefig, figname=figname, extension=extension)
-            else:
-                # This will need to change if I want to validate multiple datasets at the same time
-                fillhb = np.zeros((len(propagationset),1))
-                fillhb[:] = model.parvals[-1]
-                par95 = np.hstack((propagationset[:,model.posfree<3], fillhb))
-                plot_data_model(fit=2,datastruct=valdata,concstruct=valconc,model=model,propagationset=par95, savefig=savefig, figname=figname, extension=extension)
-        return(valres)
+            # This will need to change if I want to validate multiple datasets at the same time
+            fillhb = np.zeros((len(propagationset),1))
+            fillhb[:] = model.parvals[-1]
+            par95 = np.hstack((propagationset[:,model.posfree<3], fillhb))
+            plot_data_model(fit=2,datastruct=valdata,concstruct=valconc,model=model,propagationset=par95, savefig=savefig, figname=figname, extension=extension)
+    return(valres)
 
 def _find_mfrange(timevec, damage, survtest, parsset):
+    """
+    Auxiliary function to find the range of multiplication factors
+    that result in survival probabilities close to a specified value.
+    Needed for the calculation of LPx values.
+    Follows the implementation of openGUTS (block 3.5.2 of calc_lpx.m file).
+    """
     # auxiliary function to calculate the range of multiplication
     # factors
     Send1 = models.calc_surv_sd_trapz(timevec, damage, parsset[1:])[-1]
@@ -436,6 +562,12 @@ def _find_mfrange(timevec, damage, survtest, parsset):
     return((MFlow, MFhigh))
 
 def _calculate_damage(args):
+    """
+    Auxiliary function to calculate damage for the LPx calculation.
+    This function is used to parallelize the damage calculation
+    for each propagation set.
+    It takes a tuple of arguments and returns the calculated damage.
+    """
     par95_k, tlong, profile_time, profile_concarray, profile_concslopes = args
     return models.damage_linear_calc(par95_k, tlong, profile_time, profile_concarray, profile_concslopes)
 
@@ -498,6 +630,7 @@ def lpx_calculation(profile, fitmodel, propagationset = None, subset=0, lpxvals 
     - The function assumes there is only one treatment in the original profile file.
     """
     def survfrac(MF, tvals, Dvals, pars, level):
+        # auxiliary function to calculate survival fraction for SD variant
         return(models.calc_surv_sd_trapz(tvals, MF*Dvals,pars)[-1] - (1-level))
     # impose 0 background mortality
     print("Calculation of LPx values.")
@@ -871,6 +1004,52 @@ class dataclass:
             
 # this class inherits from PyParspace and extends the functionalities
 class pyGUTSred(parspace.PyParspace):
+    """
+    A class to handle the GUTS model fitting and parameter estimation
+    using the reduced GUTS model. It inherits from the PyParspace class
+    and provides additional functionalities specific to the GUTS model.
+    It initializes with the calibration data, sets up the model parameters,
+    and prepares the model for fitting.
+    In the initialization process, it initializes also the GUTS model object
+    which contains the methods for calculating damage and survival probabilities
+    and methods to calculate the loglikelihood for the fitting routines.
+
+    Attributes:
+        variant (str): The variant of the GUTS model ('IT' or 'SD').
+        hbfree (bool): Whether to fit the background mortality parameter.
+        calibpath (list): List of paths to the calibration data files.
+        ndatasets (int): Number of datasets in the calibration data.
+        fullset (list): List to store the full set of calibration data.
+        bestaic (float): Best Akaike Information Criterion value found during fitting.
+        concstruct (numpy.ndarray): Array to store concentration data structures.
+        datastruct (numpy.ndarray): Array to store survival data structures.
+        concunits (str): Units of concentration data.
+        parnames (list): Names of the model parameters.
+        parvals (numpy.ndarray): Values of the model parameters.
+        lbound (numpy.ndarray): Lower bounds for the model parameters.
+        ubound (numpy.ndarray): Upper bounds for the model parameters.
+        islog (numpy.ndarray): Boolean array indicating which parameters are logarithmic.
+        isfree (numpy.ndarray): Boolean array indicating which parameters are free to vary.
+    Methods:
+        __init__(datafile, variant, hbfree=True, preset=True, parvalues=None, lbound=None, ubound=None, islog=None, isfree=None, profile=True, rough=False):
+            Initializes the pyGUTSred object with calibration data and model parameters.
+        _preset_pars():
+            Sets initial parameter values and bounds for the GUTS model.
+        fit_hb():
+            Fits the background mortality parameter to the control data.
+        plot_data_model(fit=0):
+            Plots the data and model fit for each dataset.
+        run_and_time_parspace():
+            Runs the parameter space exploration and times the execution.
+            This includes the check for slow kinetic to restart the fit.
+        EFSA_quality_criteria():
+            Checks the quality of the fit according to EFSA criteria. Wrapper around the generic function
+        lcx_calculation():
+            Calculates the LCx values for the fitted model. Wrapper around the generic function
+        
+    Raises:
+        ValueError: If the calibration data is not provided as a list or if the parameter settings are incorrect.
+    """
     def __init__(self,
                  datafile,
                  variant,
@@ -946,6 +1125,11 @@ class pyGUTSred(parspace.PyParspace):
         # self.plot_data_model(fit=0) 
 
     def _preset_pars(self):
+        """
+        Initial settings of the parameters for the GUTS model.
+        This method sets the bounds of the parameters
+        following the openGUTS code.
+        """
         self.isfree = np.concatenate(([1,1,1],[0]*self.ndatasets)) # last positions are for the hb values
         self.islog = np.concatenate(([1,1,0],[0]*self.ndatasets))
         self.lbound = np.zeros(3+self.ndatasets)
@@ -997,6 +1181,11 @@ class pyGUTSred(parspace.PyParspace):
         print("parameters are free: ",self.isfree)
 
     def fit_hb(self):
+        """
+        Fit the hazard rate to control data for each dataset.
+        The routine uses a standard Nelder-Mead optimization method to find the best fit
+        for the hazard rate parameter (hb) in the GUTS model.
+        """
         for i in range(self.ndatasets):
             res = sp.optimize.minimize(models.hb_fit_ll, 
                                    x0=self.parvals[2+(i+1)], 
@@ -1007,8 +1196,16 @@ class pyGUTSred(parspace.PyParspace):
             print("hb fitted to control data for dataset %d: %.4f"%(i+1,self.parvals[2+(i+1)]))
 
     def run_and_time_parspace(self,batchmode=True,savefig=False,figbasename="fit",extension=".png"):
-        # wrapper around the parameter space explorer so that
-        # we can include meausures in case there is slow kinetic
+        """
+        Run the parameter space exploration and time it.
+        This method wraps around the parameter space explorer to include measures
+        in case there is a slow kinetic detected.
+        Arguments:
+            batchmode (bool): If True, runs in batch mode without displaying plots.
+            savefig (bool): If True, saves the figures to files.
+            figbasename (str): Base name for the saved figures.
+            extension (str): File extension for the saved figures.
+        """
         start = time.time()
         out = self.run_parspace(batchmode=batchmode,savefig=savefig,figbasename=figbasename,extension=extension)
         if out[0]==-1:
@@ -1028,15 +1225,28 @@ class pyGUTSred(parspace.PyParspace):
         print("Elapsed time for the parameter space exploration: %.4f"%(stop-start))
 
     def plot_data_model(self,fit,modellabel='model', add_obspred=True, savefig=False, figname='', extension='.png'):
+        """
+        Plot the data and model predictions.
+        Wrapper around the generic function `plot_data_model` to visualize the fit results.
+        """
         plot_data_model(fit=fit, datastruct=self.datastruct, concstruct=self.concstruct, model=self.model,
                         propagationset = self.propagationset, modellabel=modellabel, add_obspred=add_obspred,
                         savefig=savefig, figname=figname, extension=extension)	
 
     def EFSA_quality_criteria(self):
+        """
+        Calculate the EFSA quality criteria for the model fit.
+        This method wraps around the EFSA_quality_criteria function to evaluate the model's fit quality.
+        """
         efsares = EFSA_quality_criteria(self.datastruct, self.concstruct, self.model)
         return(efsares)
 
     def lcx_calculation(self, timepoints=[2,4,10,21],levels=[0.1,0.2,0.5], plot=False, propagationset=None, savefig=False, figname='', extension='.png'):
+        """
+        Calculate the LCx values for the model.
+        This method wraps around the lcx_calculation function to compute lethal concentrations
+        at specified time points and levels.
+        """
         lcxvals = lcx_calculation(self.model, timepoints=timepoints, levels=levels, propagationset=propagationset, plot=plot, concunits=self.concunits,
                         savefig=savefig, figname=figname, extension=extension)
         return(lcxvals)
