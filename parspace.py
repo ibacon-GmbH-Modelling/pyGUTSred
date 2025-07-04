@@ -224,9 +224,9 @@ class SettingParspace:
         self.n_max = 12;  # maximum number of rounds for the algorithm (default 12)
         
         # criteria for the slow kinetic case
-        self.slowkin_corr = 0.70 # minimum correlation coefficient between <kd> and <mw>
-        self.slowkin_pars = 0.05 # closeness of <kd> and <mw> to their lower bound (as fraction of total range)
-        self.slowkin_f_mw = 3    # factor by which to multiply current-highest <mw> to get new upper bound
+        self.slowkin_corr = 0.70 # minimum correlation coefficient between <kd> and <zs>
+        self.slowkin_pars = 0.05 # closeness of <kd> and <zs> to their lower bound (as fraction of total range)
+        self.slowkin_f_mw = 3    # factor by which to multiply current-highest <zs> to get new upper bound
         self.slowkin_f_kd = 10   # factor by which to multiply current-highest <kd> to get new upper bound
         
         if rough:
@@ -320,16 +320,17 @@ class PyParspace:
         self.npars = sum(self.model.isfree)
         self.posfree = np.argwhere(self.model.isfree == 1).flatten()
         self.parlabels = np.copy(self.model.parnames)
+        # deal with logarithmic parameters
         for i in range(self.npars):
             if self.model.islog[i] == 1:
                 self.parlabels[i] = "log10(%s)"%self.parlabels[i]
         self.parlabels = self.parlabels[self.posfree]
         # object that is a copy of the initial parameters of the model, but I do not care if it gets overwritten
         self.propagationset = np.array([]) #placeholder
-        self.fullset = np.copy(self.model.parvals) # stores the full set of parameters
+        self.fullset = np.copy(self.model.parvals) # stores the full set of parameters. This is because not all parameter might be free
         self._startp = np.copy(self.model.parvals) # needed for internal operations 
 
-    # Using here sequential approach as the model is not computationally heavy
+    # Using here sequential approach as the model is still not computationally heavy
     # enough to offset the overhead of parallelization
     def _applylog(self,sample_scaled):
        llog = np.zeros(sample_scaled.shape[0])
@@ -351,6 +352,7 @@ class PyParspace:
         if self.npars==1:
             bounds=None
         else:
+            # keep the bounds pre-defined in the model initialization
             bounds = [(self.model.parbound_lower[i], self.model.parbound_upper[i]) for i in posfree]
         if rough:
             # make here a rougher minimization by changing the options
@@ -370,6 +372,8 @@ class PyParspace:
 
         Arguments:
             - selectedsample : selected sample
+            - l_bounds : lower bounds of the parameters
+            - u_bounds : upper bounds of the parameters
             - n_tr_i : number of tries
             - f_d_i_dgrid : maximum jump size as fraction of the grid spacing
         """
@@ -380,14 +384,20 @@ class PyParspace:
         mutatesample = np.zeros((n_cont*n_tr_i, npars))
         mutatellog = np.inf * np.ones(n_cont*n_tr_i)
         for i in range(n_cont):
+            # create new values for the parameters using random mutations
+            # f_d_i_dgrid is the maximum jump size as fraction of the grid spacing
+            # selectedsample[i] is the current parameter set
+            # np.random.uniform(-1,1, (n_tr_i,npars) creates a random array of shape (n_tr_i,npars)
+            # with values between -1 and 1
             newvals = selectedsample[i] + f_d_i_dgrid * np.random.uniform(-1,1, (n_tr_i,npars))
             newvals = np.clip(newvals, l_bounds, u_bounds)  # make sure we are not outside the boundaries of the parmeters
-            mutatesample[i*n_tr_i:(i+1)*n_tr_i] = newvals
-        mutatellog = self._applylog(mutatesample)
-        sortind = np.argsort(mutatellog)
+            mutatesample[i*n_tr_i:(i+1)*n_tr_i] = newvals   # assign the new values to the mutatesample array
+        mutatellog = self._applylog(mutatesample)           # calculate the loglikelihood for all the samples
+        sortind = np.argsort(mutatellog)                    # sort the samples by their loglikelihood
         # sorted list of paramters
         mutatesample = mutatesample[sortind]
         mutatellog = mutatellog[sortind]
+        # remove NaN values from the loglikelihood and the corresponding samples
         mask = np.isnan(mutatellog)==False # compute this only once
         mutatellog_nonan = mutatellog[mask]
         mutatesample_nonan = mutatesample[mask]
@@ -395,6 +405,28 @@ class PyParspace:
     
     # function to check if the profile is if problematic with respect to the sample
     def _test_profile(self, coll_all, parprofile, settings):
+        """
+        Check if the profile is good enough with respect to the sample
+        Parameters:
+        -----------
+        coll_all : np.array
+            complete set of the inner and outer rim of the explorer with likelihood information
+        parprofile : list of np.array
+            profile for the free parameter being tested
+        settings : SettingParspace object
+            settings for the parameter space explorer
+        Returns:
+        --------
+        flag_profile : list
+            [flag, maximum distance between profile and sample]
+             - flag = 0 if the profile is good enough, 1 if not
+             - maximum distance between profile and sample
+        Note:
+        -----
+        The function updates the value of attribute coll_ok 
+        which is the array of ok parameter sets that are used 
+        to start the next exploration
+        """
         # This function might need some more testing
         # ind_fit = np.copy(self.posfree)
         coll_ok = np.zeros((0,self.npars+1))
@@ -445,7 +477,7 @@ class PyParspace:
     # Perform the profile likelihood for the parameter at index <index>
     def _parameter_profile_sub(self,index):
         # without np.copy, the assignment is by reference
-        # and the original array is modified and this creates
+        # and the original array is modified. This creates
         # problems with the routine
         coll_allL = np.copy(self.coll_all[:,-1])
         coll_all = np.copy(self.coll_all[:,:-1])
@@ -631,6 +663,7 @@ class PyParspace:
         if self.opts.profile:
             chicrit_single = 0.5 * self.opts.crit_table[0]
             res_parspace = np.zeros((self.npars,6))
+            # always show the results in linear scale, by transforming back the parameter values
             res_parspace[:,0] = (10**(self.coll_all[0,:-1])*self.model.islog[self.posfree] + 
                                  self.coll_all[0,:-1]*(1-self.model.islog[self.posfree])).transpose() # best fit values
             print("Results obtained with the parameters space explorer with profiling option.")
@@ -641,6 +674,7 @@ class PyParspace:
                 prof_tst = np.copy(self.profile[i])
                 prof_tst[:,-1] = prof_tst[:,-1] - mll - chicrit_single
                 if prof_tst.shape[0]>0:
+                    # the likelihood of the first point of the profile is below the critical level for the 95% confidence level
                     if prof_tst[0,-1] < 0:
                         res_parspace[i,1] = (10**(self.model.parbound_lower[self.posfree[i]])*self.model.islog[self.posfree[i]] +
                                               (self.model.parbound_lower[self.posfree[i]])*(1-self.model.islog[self.posfree[i]]))
@@ -652,6 +686,7 @@ class PyParspace:
                             res_parspace[i,1] = (10**val*self.model.islog[self.posfree[i]] + 
                                                  val*(1-self.model.islog[self.posfree[i]]))
                     if prof_tst[-1,-1] < 0:
+                        # the likelihood of the last point of the profile is below the critical level for the 95% confidence level
                         res_parspace[i,2] = (10**(self.model.parbound_upper[self.posfree[i]])*self.model.islog[self.posfree[i]] + 
                                              (self.model.parbound_upper[self.posfree[i]])*(1-self.model.islog[self.posfree[i]]))
                         res_parspace[i,4] = 1 # flag for upper bound
@@ -680,6 +715,7 @@ class PyParspace:
         else:
             coll_all = np.copy(self.coll_all)
             mll = coll_all[0,-1]
+            # find the indices of the 95% confidence intervals
             ind_prop1 = np.argwhere(coll_all[:,-1] < mll + 0.5 * self.opts.crit_prop[0]).flatten().max()
             ind_prop2 = np.argwhere(coll_all[:,-1] < mll + 0.5 * self.opts.crit_prop[1]).flatten().max()
             res_parspace = np.zeros((self.npars,3))
@@ -700,7 +736,9 @@ class PyParspace:
     # the parameter space explorer includes arguments to save the resulting figure
     def _plot_samples(self,profile=None, batchmode= False, savefig=False, figbasename="", extension=".png"):
         '''
-        Plot the results of the parameter space explorer
+        Plot the results of the parameter space explorer as a corner plot
+        In the diagonal there is the likelihood as a function of the parameter value
+        and off the diagonal the correlation plots between parameter pairs
         Arguments:
         ----------
         profile : list
@@ -734,6 +772,7 @@ class PyParspace:
             while j<=i:
                 ax[i,j]=plt.subplot(npars,npars,i*npars+j+1)
                 if i==j:
+                    # diagonal plots with the likelihood as a function of the parameter value
                     ax[i,j].plot(coll_joint[:,i], coll_joint[:,-1]-mll, ".", color="tab:blue",label="Joint CI")
                     ax[i,j].plot(coll_inner[:,i], coll_inner[:,-1]-mll, ".", color="tab:green", label="Inner CI")
                     ax[i,j].plot(best_set[i], 0, "o", color="tab:red", label="Best fit")
@@ -780,6 +819,20 @@ class PyParspace:
     # Run the paramter space explorer with the given options defined in the 
     # intialization of the class
     def run_parspace(self, batchmode=True, savefig=False,figbasename="fit",extension=".png"):
+        """
+        Run the parameter space explorer with the given options.
+        Parameters:
+        -----------
+        batchmode : bool
+            If True, the figure is not shown
+        savefig : bool
+            If True, the figure is saved to a file 
+            (it works independently from batchmode).
+        figbasename : str
+            Base name of the figure file.
+        extension : str
+            Extension of the figure file.
+        """
         crit_add = self.opts.crit_add
         n_tr = self.opts.n_tr
         f_d = self.opts.f_d
@@ -797,6 +850,7 @@ class PyParspace:
         chicrit_max = max(1.2*chicrit_joint, chicrit_single+1.5) # criterion for, roughly, a 97.5% joint CI for pruning the sample
 
         # If number of parameters is below 5, we use regular grid, otherwise we go with the latin hypercube
+        # as in BYOM
         n_tries = int(np.prod(tries_1))
         l_bounds = self.model.parbound_lower[self.posfree]
         u_bounds = self.model.parbound_upper[self.posfree]
@@ -809,7 +863,7 @@ class PyParspace:
             p_try = [np.linspace(np.array(lb),np.array(ub),tr) for (lb,ub,tr) in zip(l_bounds, u_bounds, tries_1.astype(int))]
             # calculate all the possible combinations of the grid points
             sample_scaled = np.array(np.meshgrid(*(p_try))).T.reshape(-1, self.npars)
-            # reshuffle all combinations
+            # reshuffle all combinations (np.random.shuffle works in place)
             np.random.shuffle(sample_scaled)
         
         print(['Starting round ',1,' Initial run with ',n_tries,' parameter sets'])
@@ -817,7 +871,7 @@ class PyParspace:
         
         llog = np.zeros(sample_scaled.shape[0])
         llog = self._applylog(sample_scaled) 
-        sortind = np.argsort(llog)
+        sortind = np.argsort(llog) # sort the likelihood values in ascending order
     
         # sorted list of paramters
         coll_all = sample_scaled[sortind]   # paramter vectors
@@ -838,7 +892,7 @@ class PyParspace:
         # % Check if we found a lot of ok values (that can for example happen when
         # % the ranges are set much tighter by the user).
         print("So far best likelihood value is: %.4f"%mll)
-        n_rnd = 2
+        n_rnd = 2  # counter, we start from 2 because the first step is the first setup
         n_tr_i = n_tr[n_rnd-1]
         f_d_i = f_d[n_rnd-1]
         chicrit_i = chicrit_rnd[n_rnd-1]
@@ -885,17 +939,24 @@ class PyParspace:
             ## GUTS only. Check for slow kinetic
             if ((((self.model.isfree[0]==1) & (self.model.isfree[2]==1)) & ((self.model.islog[2]==0) & (self.model.islog[0]==1))) & ((self.model.parbound_upper[2]/self.model.parbound_lower[2]) > 10)):                
                 coll_tst = coll_all[:max(ind_final,n_ok),:]
-                min_mw = min(coll_tst[:,2])
-                min_kd = min(coll_tst[:,0])
-                check_corr = np.corrcoef(np.log10(coll_tst[:,2]),coll_tst[:,0])
-                crit_mw = (min_mw - self.model.parbound_lower[2]) / (self.model.parbound_upper[2] - self.model.parbound_lower[2])
+                min_zs = min(coll_tst[:,2])  # threshold parameter (zs)
+                min_kd = min(coll_tst[:,0])  # dynamic rate parameter
+                # get the correlation coefficient between the threshold and kd
+                check_corr = np.corrcoef(np.log10(coll_tst[:,2]),coll_tst[:,0]) 
+                # distance from lower bound as fraction of range
+                crit_zs = (min_zs - self.model.parbound_lower[2]) / (self.model.parbound_upper[2] - self.model.parbound_lower[2])
+                # distance from lower bound as fraction of range
                 crit_kd = (min_kd - self.model.parbound_lower[0]) / (self.model.parbound_upper[0] - self.model.parbound_lower[0])
                 if (check_corr[0,1] > self.opts.slowkin_corr):
-                    if (crit_mw < self.opts.slowkin_pars) | (crit_kd < self.opts.slowkin_pars):
+                    if (crit_zs < self.opts.slowkin_pars) | (crit_kd < self.opts.slowkin_pars):
                         # fix here
+                        # the new limits are taken as the minimum and maximum of the current cloud
                         lowerv = np.min(coll_tst, axis=0)                        
                         upperv = np.max(coll_tst, axis=0)
                         slwkin = -1
+                        # return to the main code highlighting that slow kinetic was found
+                        # the main code will restart the profile changing the scale of
+                        # the threshold parameter (from linear to log)
                         return (slwkin,lowerv,upperv)
     
             if ind_final > n_conf[0]:      # checking if the outer rim has enough values (see options)
@@ -983,7 +1044,7 @@ class PyParspace:
             coll_all = coll_all[mask,:]
             coll_allL = coll_allL[mask]
             # The following code works because coll_allL is a sorted array.
-            # This means that if 2 parameter vector that have the same likelihood will
+            # This means that if 2 parameter vectors have the same likelihood, they will
             # be next to each other. We want to avoid the eventuality that we remove
             # two parameter vectors that are different, but that have the same likelihood
             # so first we check if there are parameter duplicates and remove them
@@ -998,7 +1059,7 @@ class PyParspace:
     
         # perform now a simplex optimization
         print("Now we proform a final simplex optimization")
-        pfit = coll_all[0]
+        pfit = coll_all[0]  # take the best set
         bfit_final,llog_final = self._NM_minimizer(pfit,self._startp,self.posfree, rough=0)
         coll_all = np.append([bfit_final], coll_all, axis=0)
         coll_allL = np.append(llog_final, coll_allL)
@@ -1020,10 +1081,8 @@ class PyParspace:
             self._plot_samples(batchmode=batchmode,savefig=savefig,
                                figbasename=figbasename,
                                extension=extension)    
-            # have a return statement here
         else:
             # perform a profile likelihood to determine the confidence intervals
-            # n_rnd = n_rnd+1
             print("Starting round ",n_rnd," for profile likelihood of each parameter")
             parprofile=[0]*n_cores
             pbest = np.zeros((self.npars,self.npars+1))
@@ -1039,9 +1098,7 @@ class PyParspace:
             # TODO proper pruning of the profiling results
             self.pbest = pbest[np.argmin([p[-1] for p in pbest])]
             #self.coll_ok = coll_ok[np.argmin([p[-1] for p in pbest])] # take the best value
-            self.coll_ok = np.concatenate((coll_ok), axis=0)
-            # flag_short = 0 # for now we do not do anything with it. It needs to be defined for the pruning
-            #if self.pbest.size > 0:
+            self.coll_ok = np.concatenate((coll_ok), axis=0) # rejoin all the coll_ok arrays from the profiling function
             if self.pbest[-1] < mll:
                 print("The profiling found a new minimum. Optimizing from here")
                 pfit,llog = self._NM_minimizer(self.pbest[:-1],self._startp,self.posfree, rough=0)
@@ -1054,6 +1111,8 @@ class PyParspace:
                 ind_single = np.argwhere(self.coll_all[:,-1] < self.coll_all[0,-1]+chicrit_single).flatten().max()
             mll = self.coll_all[0,-1] # store the new best likelihood value    
             if (self.coll_ok.size > 0) | (ind_single < n_conf[1]):
+                # still not enough values in the inner rim or there are gaps between profile and samples
+                # resampling will be needed
                 if (self.coll_ok.size < 1) | ((ind_single < n_conf[1]) & (self.coll_ok.shape[0] < 10)):
                     self.coll_ok = np.append(self.coll_ok, self.coll_all[max(0,ind_single-n_ok):min(ind_single+n_ok,self.coll_all.shape[0])], axis=0)
                 coll_tmp    = np.append(self.coll_ok[:,:-1] , self.coll_all[0:ind_final,:-1], axis=0)

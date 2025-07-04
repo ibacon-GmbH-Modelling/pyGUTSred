@@ -35,6 +35,7 @@ def damage_linear_calc(kd, timeext, timeconc, conc, slopes):
         c_start = conc[i]                       # take as initial concentration the new one in this period
         slope   = slopes[i]                       # take as slope the new one in this period
         # See openGUTS code for explanation
+        # original openGUTS comment:     % Thanks to Bob Kooi for using Maple to obtain the solution for me.   
         damage[ind_t] = slope * te + c_start - slope / kd + np.exp(-kd * te) * (Dw0 - c_start + slope / kd)
         t_end = timeconc[i+1] - timeconc[i] # last time point in this interval is start time for new period
         Dw0   = slope * t_end + c_start - slope / kd + np.exp(-kd * t_end) * (Dw0 - c_start + slope / kd)
@@ -42,11 +43,14 @@ def damage_linear_calc(kd, timeext, timeconc, conc, slopes):
 
 @jit(nopython=True)
 def calc_damage_const(t,C,kd):
+    # analytical solution for constant concentrations
     damage = C*(1-np.exp(-kd*t))
     return(damage)
 
 @jit(nopython=True)
 def calc_survival_SD(y,t,D,pars):
+    # integrand for the differential equation
+    # for the SD variant of the GUTS model
     bw,zw,hb=pars
     dydt = 0
     dydt = -(bw*max(D-zw,0)+hb)*y
@@ -63,6 +67,7 @@ def calc_surv_sd_trapz(tvals, Dvals,pars):
 
 @jit(nopython=True)
 def calc_surv_sd_const(tvals,Cvals,pars):
+    # analytical solution for constant concentrations
     kd,bw,zw,hb=pars
     minH = np.zeros_like(tvals)
     Sc=0
@@ -250,10 +255,12 @@ class GUTSmodels:
         '''
         if self.variant == 'SD':
             if consc:
+                # if constant concentration, use analytical solution
                 survival = calc_surv_sd_const(timeext,
                                               concdata[0],
                                               pars)
             else:
+                # if not constant concentration, use numerical solution with trapezium rule
                 survival = calc_surv_sd_trapz(timeext, damage, pars[1:])
         else:
             survival = guts_itmodel(timeext, damage, pars[1:])
@@ -274,9 +281,13 @@ class GUTSmodels:
         llik = 0
         nd=0
         while nd < self.ndatasets: # this could be run in parallel (or directly back in the parspace explorer)
-            modelpars_nd = np.concatenate((modelpars[:3],[modelpars[3+nd]]))
+            # the first three parameters are the same for all datasets, the fourth is the hb value, potentially different for each dataset
+            modelpars_nd = np.concatenate((modelpars[:3],[modelpars[3+nd]])) 
             i =0
             while i < self.concstruct[nd].ntreats:
+                # for each treatment, calculate the damage and survival probability
+                # the class method already accounts for the model variant
+                # and whether the concentration is constant or not
                 damage = self.calc_damage(modelpars_nd[0],self.timeext[nd][i], self.concstruct[nd].time, 
                                           self.concstruct[nd].concarray[i], self.concstruct[nd].concslopes[i],
                                           self.concstruct[nd].concconst[i])
