@@ -10,6 +10,8 @@ from copy import deepcopy
 import multiprocessing as mp
 
 # return the number of available physical cores
+# to be used for parallel processing throughout the
+# package
 import psutil
 n_cores = psutil.cpu_count(logical=False)
 
@@ -154,6 +156,7 @@ def lcx_calculation(model, timepoints=[2,4,10,21], levels=[0.1,0.2,0.5], propaga
     LCxlo = np.zeros((len(timepoints),len(levels)))
     LCxup = np.zeros((len(timepoints),len(levels)))
     if (propagationset is not None):
+        # load the propagation set for later use
         #pars95[model.posfree] = propagationset[j]
         par95 = np.copy(model.parvals)
         par95 = np.expand_dims(par95, axis = 0)
@@ -161,7 +164,8 @@ def lcx_calculation(model, timepoints=[2,4,10,21], levels=[0.1,0.2,0.5], propaga
         par95[:,model.posfree] = propagationset
         par95 = 10**par95*model.islog + par95*(1-model.islog)
         par95[:,-model.ndatasets:] = 0 # remove the background mortality
-        par95 = par95[:,:4]
+        # restrict to basic 4 parameters (the extra ones were for the other datasets)
+        par95 = par95[:,:4]   
     for i in range(len(timepoints)):
         timevectors = np.linspace(0,timepoints[i],model.nbinsperday)
         for j in range(len(levels)):
@@ -181,14 +185,23 @@ def lcx_calculation(model, timepoints=[2,4,10,21], levels=[0.1,0.2,0.5], propaga
                     LCxlo[i,j] = lcxmin
                     LCxup[i,j] = lcxmax
             else:
+                # SD model variant
+                # to find the LCx values, we need a iterative approach to find the 
+                # concentration at which we have the survival below the requested level
+                # Once we have the limits we can use a root finding algorithm
+                # One limit can be the threshold parameter that will give 0 mortality
+                # The other limit is found by increasing the concentration until the survival
+                # is below the requested level
                 conclims = np.array([modelpars[2]/10, modelpars[2]])
                 crit = 1
                 while crit>0:
                     conclims[1] = conclims[1] * 10 # shift lower and upper range by factor of 10
                     crit   = survfrac(conclims[1],timevectors,modelpars,levels[j]) # calculate criterion from upper range  
+                # brenth function implements the same algorithm used in the matlab implementation of openguts
                 LCx[i,j] = sp.optimize.brenth(survfrac,conclims[0],conclims[1],args=(timevectors,modelpars,levels[j]))
                 if (propagationset is not None):
                     for k in par95:
+                        # if requested, same procedure for each element of the propagation set
                         conclims = np.array([k[2]/10, k[2]])
                         crit = 1
                         while crit>0:
@@ -527,6 +540,8 @@ def validate(validationfile, fitmodel, propagationset, hbfix = True, plot = True
         model.parvals[-1] = 0
         print("hb fixed to 0. For a fit of the background mortality to the control data use hbfix=True")
     print("Validation of model with %s variant"%model.variant)
+    # Calculate the EFSA criteria for the model applied to the validation data
+    # The output of this function is also returned by the validate function (dict object)
     valres = EFSA_quality_criteria(np.array(valdata), np.array(valconc), model)
     if plot:
         if propagationset is None:
@@ -535,7 +550,8 @@ def validate(validationfile, fitmodel, propagationset, hbfix = True, plot = True
             # This will need to change if I want to validate multiple datasets at the same time
             fillhb = np.zeros((len(propagationset),1))
             fillhb[:] = model.parvals[-1]
-            par95 = np.hstack((propagationset[:,model.posfree<3], fillhb))
+            # attach the fitted hb to the propagation set maintaining the order of the other parameters
+            par95 = np.hstack((propagationset[:,model.posfree<3], fillhb)) 
             plot_data_model(fit=2,datastruct=valdata,concstruct=valconc,model=model,propagationset=par95, savefig=savefig, figname=figname, extension=extension)
     return(valres)
 
@@ -644,6 +660,8 @@ def lpx_calculation(profile, fitmodel, propagationset = None, subset=0, lpxvals 
     model.parvals[-1] = 0
     modelpars = np.copy(10**model.parvals*model.islog + model.parvals*(1-model.islog))
 
+    # prepare a long time vector that will cover the entire profile with the precision of the model
+    # and make sure that includes also the original points of the profile
     tlong = np.linspace(profile.time[0], profile.time[-1],int(profile.time[-1] * model.nbinsperday+1))
     tlong = np.append(profile.time,tlong)  # to make sure we are not skipping datapoints            
     tlong = np.unique(tlong)
@@ -690,6 +708,7 @@ def lpx_calculation(profile, fitmodel, propagationset = None, subset=0, lpxvals 
         survk= np.zeros((len(propagationset),len(tlong))) # temp vector for survival
         print("Precomputing damage vector for all the propagation sets.")
         print("Depending on how finely sampled the profile is, this could take a while.")
+        # parallel implementation of the damage calculation
         with mp.Pool(n_cores) as pool:
             damk = pool.map(_calculate_damage, [(par95[k][0], tlong, profile.time, profile.concarray[0], profile.concslopes[0]) for k in range(len(par95))])
         damk = np.array(damk)
@@ -697,6 +716,7 @@ def lpx_calculation(profile, fitmodel, propagationset = None, subset=0, lpxvals 
     if model.variant == "IT":
         maxDw = max(damage1)
         beta = np.log(39)/np.log(modelpars[1])
+        ## calculating S vs MF 
         for i in range(len_srange):
             Feff = 1-srangevec[i]
             LPxpl[i] = (modelpars[2]/maxDw) * (Feff/(1-Feff))**(1/beta)
@@ -711,6 +731,7 @@ def lpx_calculation(profile, fitmodel, propagationset = None, subset=0, lpxvals 
                         lpxmax = lpx
                 LPxpllo[i] = lpxmin
                 LPxplup[i] = lpxmax
+        ## done calculating S vs MF
         for i in range(len(lpxvals)):
             Feff = lpxvals[i]
             LPx[i,0] = (modelpars[2]/maxDw) * (Feff/(1-Feff))**(1/beta)
@@ -732,7 +753,7 @@ def lpx_calculation(profile, fitmodel, propagationset = None, subset=0, lpxvals 
         mf1, mf2 = _find_mfrange(tlong, damage1, srange[1], modelpars)
         rootlarge = sp.optimize.brenth(survfrac,mf1, mf2,args=(tlong, damage1, modelpars[1:], 1-srange[1]))
         # mfvec = np.logspace(np.log10(rootlarge),np.log10(rootsmall), len_srange)
-        mfvec = np.logspace(np.log10(rootlarge*0.8),np.log10(rootsmall*1.2), len_srange) # extend a little the range in case the drop in survival is too sharp
+        mfvec = np.logspace(np.log10(rootlarge*0.8),np.log10(rootsmall*1.2), len_srange) # extend a little the range in case the drop in survival is sharp
         ## calculating S vs MF 
         for i in range(len_srange):
             Survpl[i] = models.calc_surv_sd_trapz(tlong, mfvec[i]*damage1, modelpars[1:])[-1]
@@ -749,6 +770,8 @@ def lpx_calculation(profile, fitmodel, propagationset = None, subset=0, lpxvals 
                 Survplup[i] = survmax
         ## done calculating S vs MF
         for j in range(len(lpxvals)):
+            # identify the limits of the interval where the root is, depending on the LPx level
+            # required
             ind_lo = np.argwhere(Survpl < (1-lpxvals[j])).flatten().max()
             ind_hi = np.argwhere(Survpl > (1-lpxvals[j])).flatten().min()
             LPx[j,0] = sp.optimize.brenth(survfrac,mfvec[ind_lo],mfvec[ind_hi],args=(tlong, damage1, modelpars[1:], lpxvals[j]))
@@ -771,6 +794,7 @@ def lpx_calculation(profile, fitmodel, propagationset = None, subset=0, lpxvals 
         values = "LP{:<3}:  {:<7.3g} ({:<7.3g} - {:<7.3g})       ".format(round(lpxvals[j]*100),LPx[j,0], LPx[j,1], LPx[j,2])
         print(values)
     if plot:
+        # first figure of the survival at the end of the profile vs multiplication factor (MF)
         fig=plt.figure()
         ax = fig.subplots(1,1)
         if model.variant == 'IT':
@@ -896,24 +920,25 @@ class concclass:
         for i in range(self.ntreats):
             nans, x = np.isnan(self.concarraytr[i]), lambda z: z.nonzero()[0]
             if np.sum(~nans) == 1:
-                self.concarraytr[i][nans] = self.concarraytr[i][~nans][0]
+                self.concarraytr[i][nans] = self.concarraytr[i][~nans][0] # fill the nan with the first non-nan value
             else:
                 for nan_idx in np.where(nans)[0]:
                     if nan_idx == 0:
-                        self.concarraytr[i][nan_idx] = np.nan
+                        self.concarraytr[i][nan_idx] = np.nan # TO DO CHECK THIS
                     elif nan_idx == len(self.time) - 1:
-                        self.concarraytr[i][nan_idx] = self.concarraytr[i][nan_idx - 1]
+                        self.concarraytr[i][nan_idx] = self.concarraytr[i][nan_idx - 1]  # use the last non-nan value
                     else:
+                        # interpoletion between the previous and next non-NaN values
                         prev_idx = nan_idx - 1
                         next_idx = nan_idx + 1
                         while next_idx < len(self.time) and np.isnan(self.concarraytr[i][next_idx]):
-                            next_idx += 1
+                            next_idx += 1   # make sure to find the next non-NaN value
                         if next_idx < len(self.time):
                             self.concarraytr[i][nan_idx] = np.interp(self.time[nan_idx], [self.time[prev_idx], self.time[next_idx]], [self.concarraytr[i][prev_idx], self.concarraytr[i][next_idx]])
                         else:
                             self.concarraytr[i][nan_idx] = np.nan
             self.concslopestr[i,:-1] = np.diff(self.concarraytr[i])/np.diff(self.time)   
-            self.conctwa[i] = np.trapz(self.concarraytr[i],self.time)/self.time[-1]
+            self.conctwa[i] = np.trapz(self.concarraytr[i],self.time)/self.time[-1]  # time weighted average
             self.concmax[i] = np.max(self.concarraytr[i])
             if (np.all(self.concslopestr[i])==0) & (len(np.unique(self.concarraytr[i]))<2):
                 self.concconst[i] = 1
@@ -1072,8 +1097,7 @@ class pyGUTSred(parspace.PyParspace):
             raise ValueError("Please, provide the calibration file as a list")
         for i in range(self.ndatasets):
             tmp = readfile(datafile[i])
-            #self.concstruct.append(tmp[0])
-            #self.datastruct.append(tmp[1]) 
+            # Done using a list for flexibility in case of calibration on multiple datasets
             self.concstruct = np.append(self.concstruct, tmp[0])
             self.datastruct = np.append(self.datastruct, tmp[1])
             if self.concstruct[i].time[-1] < self.datastruct[i].time[-1]:
@@ -1083,16 +1107,25 @@ class pyGUTSred(parspace.PyParspace):
                                                         axis=1)
         unitslist = [x.concunits for x in self.concstruct]
         if len(np.unique(unitslist))>1:
+            # print a warning in case the units are different
             print("Warining, the concentration units in the datafiles are different. Hope you know what you are doing.")
             print("The code will proceed with the units reported in the first file")
-        self.concunits = self.concstruct[0].concunits   # add an error or a warning in case the units are different
+        self.concunits = self.concstruct[0].concunits   
+        # Name of the parameters. We follow here the BYOM nomenclature.
+        # In the SD variant:
+        #   - the threshold parameter is indicated with 'zs' and correspond to the parameter 'mw' in openGUTS 
+        #   - the effect strength is indicated with 'bs' and correspond to the parameter 'bw' in openGUTS
+        # In the IT variant:
+        #   - the threshold parameter is indicated with 'zs' and correspond to the parameter 'mw' in openGUTS 
         if variant == 'SD':
             self.parnames = ["kd","bs","zs"]
         else:
             self.parnames = ["kd","Fs","zs"]
         for i in range(self.ndatasets):
+            # assign a new background mortality parameter for each dataset
             self.parnames = self.parnames+["hb%d"%(i+1)]
         if preset:
+            # run the preset function that operates like in openGUTS
             self._preset_pars()
         else:
             # in this case the user needs to insert the values
@@ -1101,11 +1134,12 @@ class pyGUTSred(parspace.PyParspace):
             self.ubound = ubound
             self.islog = islog
             self.isfree = isfree
-            if len(parvalues) != 4 or len(lbound) != 4 or len(ubound) != 4 or len(islog) != 4 or len(isfree) != 4:
+            if len(parvalues) != len(self.parnames) or len(lbound) != len(self.parnames) or len(ubound) != len(self.parnames) or len(islog) != len(self.parnames) or len(isfree) != len(self.parnames):
                 raise ValueError("need to set all the various parameters")
         if self.hbfree == False:
             print("fit hb to control data")
-            self.fit_hb()    
+            self.fit_hb()   # fit on control data done with a standard Nelder-Mead minimizer 
+        # initialize the model class
         self.model = models.GUTSmodels(self.datastruct,self.concstruct,self.variant,
                                        self.parnames,self.parvals,self.islog,self.isfree,
                                        self.lbound,self.ubound)
@@ -1118,10 +1152,11 @@ class pyGUTSred(parspace.PyParspace):
         print("setup the parameter space explorer")
         self.parspacesetup = parspace.SettingParspace(rough=rough,profile=profile)
         super().__init__(self.parspacesetup,self.model)
-        # commented out, can be helpful for checking the data
-        # however, it could probably be done outside the initialization,
-        # so that the user can decide whether to plot or not, or just go in
-        # batchmode
+        # commented out the plotting of the dataset,
+        # this can be helpful for checking the data
+        # however, it can also be done outside the initialization calling the
+        # dedicated function. The user can decide whether to plot or not, 
+        # or just go in batchmode
         # self.plot_data_model(fit=0) 
 
     def _preset_pars(self):
@@ -1130,14 +1165,19 @@ class pyGUTSred(parspace.PyParspace):
         This method sets the bounds of the parameters
         following the openGUTS code.
         """
+        # standard implementation is to have kd and bs (or Fs) in log scale
+        # and zs and hb in linear scale. All parameters are free to vary
+        # in the default settings
         self.isfree = np.concatenate(([1,1,1],[0]*self.ndatasets)) # last positions are for the hb values
         self.islog = np.concatenate(([1,1,0],[0]*self.ndatasets))
         self.lbound = np.zeros(3+self.ndatasets)
         self.ubound = np.zeros(3+self.ndatasets)
+        # set up the background mortality parameters for
+        # each dataset
         if self.hbfree:
             self.isfree[-self.ndatasets:] = 1
-        self.lbound[-self.ndatasets:] = 1e-6
-        self.ubound[-self.ndatasets:] = 0.07
+        self.lbound[-self.ndatasets:] = 1e-6  # do not set completely to 0, but give a very small number
+        self.ubound[-self.ndatasets:] = 0.07  # upperlimit for hb (corresponing to ~23% mortality after 21 days). 
 
         tmptime = []
         tmpconcm = []
@@ -1146,7 +1186,7 @@ class pyGUTSred(parspace.PyParspace):
             tmptime.append(self.datastruct[i].time[self.datastruct[i].time>0])
             tmpconcm.append(self.concstruct[i].conctwa[self.concstruct[i].conctwa>0])
             tmpconcM.append(self.concstruct[i].concarray[self.concstruct[i].concarray>0])
-        tmptime = np.concatenate(tmptime).ravel()
+        tmptime = np.concatenate(tmptime).ravel()  # make contiguous 1D arrays
         tmpconcm = np.concatenate(tmpconcm).ravel()
         tmpconcM = np.concatenate(tmpconcM).ravel()
         tmax = np.max(tmptime) #np.max(self.datastruct[:].time)
@@ -1154,25 +1194,46 @@ class pyGUTSred(parspace.PyParspace):
         cmax = np.max(tmpconcM)
         cmin = np.min(tmpconcm)
         # limits for kd
+        # FROM openGUTS code comments:
+        # In principle, fixed bounds for <kd> will be used. They are set at 95%
+        # of steady state within 0.5 hour (resolution of FOCUS is 1 hour), and
+        # 95% of steady state achieved in 5 years. However, if people do tests
+        # with a first observation within hours, or run extremely long tests,
+        # we need to extend them. The extension is based on the time vector:
+        # only 5% of steady state achieved at the end of the test, and 99% of
+        # steady state achieved within 1/10 of the first observation. In
+        # practice, these seem to be the identifiability limits.
         self.lbound[0] = min([np.log(20)/(5*365),-np.log(1-0.05)/tmax])
         self.ubound[0] = max([np.log(20)/(0.5/24) , -np.log(1-0.99)/(0.1*tmin)])
+        # lower limit for zs
+        # FROM openGUTS code comments:
+        # Minimum is body residue that lowest conc. will achieve in 4 hours at lowest value of <kd>.
         self.lbound[2] = cmin*(1-np.exp(-self.lbound[0]*(4./24.)))
         if self.variant == 'SD':
             # limits for bs
+            # FROM openGUTS code comments:
+            # Min is 10% effect at end of test when fast kinetics and threshold
+            # zero. Max is that what you gain in damage in one hour, at lowest
+            # exposure, at minimum <kd>, is enough to kill you (95% sure) in 1 hour.
             self.lbound[1] = -np.log(0.9)/(cmax*tmax)
             self.ubound[1] = (24**2*0.95)/(self.lbound[0]*cmax*np.exp(-self.lbound[0]*tmax*0.5))
              # upper limits for zs
+             # as 99% of the maximum concentration
             self.ubound[2] = 0.99*cmax
         else:
             # limits for Fs
+            # FROM openGUTS code comments:
+            # reasonable range
             self.lbound[1] = 1.05
             self.ubound[1] = 20
-             # upper limits for zs
+             # upper limits for zs, 2 times the maximum concentration
             self.ubound[2] = 2*cmax
         
+        # make sure the parameter bounds are converted to log10 when needed
         self.lbound = np.log10(self.lbound)*self.islog+self.lbound*(1-self.islog)
         self.ubound = np.log10(self.ubound)*self.islog+self.ubound*(1-self.islog)    
         self.parvals = (self.lbound+self.ubound)/2
+        # printout the settings for the parameters
         print("Parameter settings:")
         print("parnames: ",self.parnames)
         print("parameters lower bounds: ",self.lbound)
@@ -1194,6 +1255,7 @@ class pyGUTSred(parspace.PyParspace):
                                    bounds=[(self.lbound[2+(i+1)], self.ubound[2+(i+1)])])
             self.parvals[2+(i+1)] = res.x
             print("hb fitted to control data for dataset %d: %.4f"%(i+1,self.parvals[2+(i+1)]))
+            # Add a verbose option?? TO show additional diagnostics on the fit?
 
     def run_and_time_parspace(self,batchmode=True,savefig=False,figbasename="fit",extension=".png"):
         """
@@ -1214,12 +1276,14 @@ class pyGUTSred(parspace.PyParspace):
             self.model.islog[2] = 1
             self.islog[2] = 1 # 
             self.parlabels[2] = "log10(%s)"%self.parlabels[2]
-            # update boundary for threshold
+            # update boundary for threshold. The restriction of the boundary does not seem to work properly so it is skipped here
             # self.model.parbound_upper[2] = min(np.log10(self.model.parbound_upper[2]),np.log10(out[2][self.model.posfree==2]*self.opts.slowkin_f_mw))
-            self.model.parbound_upper[2] = np.log10(self.model.parbound_upper[2])
-            self.model.parbound_lower[2] = np.log10(self.model.parbound_lower[2])
-            # update boundary for kd
+            self.model.parbound_upper[2] = np.log10(self.model.parbound_upper[2])  # simple log10 transformation
+            self.model.parbound_lower[2] = np.log10(self.model.parbound_lower[2])  # simple log10 transformation
+            # update boundary for kd. This does not seem to improve the fit
             # self.model.parbound_upper[0] = min(self.model.parbound_upper[0],out[2][self.model.posfree==0]*self.opts.slowkin_f_kd)
+            
+            # rerun with the new settings
             out = self.run_parspace(batchmode=batchmode,savefig=savefig,figbasename=figbasename,extension=extension)
         stop = time.time()
         print("Elapsed time for the parameter space exploration: %.4f"%(stop-start))
