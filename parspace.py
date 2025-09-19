@@ -339,11 +339,11 @@ class PyParspace:
        return llog
     
     # mp version much slower for easy models
-    # this function should be used in case of comnputationally
+    # this function should be used in case of computationally
     # heavy models
     # def _applylog(self, sample_scaled):
     #     log_likelihood_partial = partial(self.model.log_likelihood, allpars=self.model.parvals, posfree=self.posfree)
-    #     with mp.Pool(6) as pool:
+    #     with mp.Pool(n_cores) as pool:
     #         llog2 = pool.map(log_likelihood_partial, sample_scaled)
     #     return np.array(llog2)
     
@@ -406,7 +406,16 @@ class PyParspace:
     # function to check if the profile is if problematic with respect to the sample
     def _test_profile(self, coll_all, parprofile, settings):
         """
-        Check if the profile is good enough with respect to the sample
+        Check if the profile is good enough with respect to the sample.
+        From openGUTS code:
+         Testing of the profile likelihood, using the sample of sets. This
+         function looks for two situations: 
+         1) Points where the MLL of the sample is considerably higher (less good)
+            than the MLL of the profile. This indicates that the sampling has been
+            poor, so we need to resample later.
+         2) Points where the MLL of the sample is considerably lower (better fit)
+            than the profile. This indicates that the profiling was not good
+            enough and may need to be redone.
         Parameters:
         -----------
         coll_all : np.array
@@ -434,8 +443,8 @@ class PyParspace:
         flag_profile = [0, 0]
         chicrit_single = 0.5 * settings.crit_table[0]
         mll = coll_all[0,-1]
-        for i_p in range(self.npars):
-            parprof = np.copy(parprofile[i_p])
+        for i_p in range(self.npars):  # run over all free parameters
+            parprof = np.copy(parprofile[i_p])  # make a hard copy of the profile
             coll_tst = coll_all[coll_all[:,-1] < (mll + chicrit_single+1),:]
             if (min(coll_tst[:,i_p]) < min(parprof[:,i_p])) | (max(coll_tst[:,i_p]) > max(parprof[:,i_p])):
                 # the profile is not good enough
@@ -444,6 +453,26 @@ class PyParspace:
                 # this should be checked carefully, see note in Tjalling's code
             parprof = parprof[parprof[:,-1] < (mll + chicrit_single+1),:] # keep important parts
             for i_g in range(1,parprof.shape[0]-1):
+
+                # From openGUTS code: 
+                # Find best value from <coll_all> in this slice. This
+                # parameter set will be compared to the profile likelihood. Note
+                # that <coll_all> is sorted, so the first within this range is
+                # automatically the best.
+                #
+                # Note: the spacing between the profile points is not necessarily
+                # the same everywhere. Profiles may hit a boundary (and are then
+                # placed on top of that boundary) or may be extended at half the
+                # default grid spacing. Therefore, it is better to take half the
+                # distance between the adjacent points. The <gridsp> is thus a
+                # two-element vector with the half distance to the previous point
+                # and to the next one. Since grid spacing is smaller when the
+                # profile has been extended, it will probably trigger more gaps
+                # than is strictly needed, and thus too much resampling. Only
+                # downside is a larger sample and longer calculation times, but
+                # that should be acceptable (since this will be a tough parameter
+                # space anyway).
+
                 gridsp = 0.5 * np.diff(parprof[[i_g-1,i_g,i_g+1], i_p], axis=0)
                 ind_tst_tmp1 = np.argwhere(coll_all[:,i_p] > (parprof[i_g,i_p]-gridsp[0])).flatten()
                 ind_tst_tmp2 = np.argwhere(coll_all[:,i_p] < (parprof[i_g,i_p]+gridsp[1])).flatten()
@@ -458,11 +487,24 @@ class PyParspace:
                     mll_compare = coll_all[ind_tst,-1]
                 mll_prof = parprof[i_g,-1]
                 if mll_prof < mll_compare:
+                    # then the profile is better than the sample (as it should be)
                     if (mll_compare - mll_prof) > self.opts.gap_extra:
                         tmp = np.append([coll_all[ind_tst,:]], [parprof[i_g,:]], axis=0)
                         coll_ok = np.append(coll_ok, tmp, axis=0)
                 elif mll_compare < mll_prof:
                     # sample is better then profile, so we will need a new profiling round
+
+                    # From openGUTS code:
+                    # The profile is on a limited number of grid points on the
+                    # parameter axis, while the sample is anywhere in the slice.
+                    # This can be done complex, but it is probably enough to only
+                    # look at the minimum of the current profile point, previous
+                    # one, and next one. If the sample is below the lowest of the
+                    # three, it deserves to be counted as a true deviation.
+                    #
+                    # Note: one could decide to also put these problem areas into
+                    # <coll_ok>. I had that in a previous version as a test, but
+                    # decided not to do it anymore (can't remember why, though).
                     min_MLL = min(parprof[[i_g-1,i_g,i_g+1], -1])
                     if mll_compare < min_MLL:
                         # DEBUG
@@ -476,6 +518,44 @@ class PyParspace:
 
     # Perform the profile likelihood for the parameter at index <index>
     def _parameter_profile_sub(self,index):
+        """
+        Perform the profile likelihood for the parameter at index <index>
+        Arguments:
+            - index : index of the parameter to profile
+        Returns:
+            - parprof : np.array
+                array with the profile for the parameter at index <index>
+        -----------
+        Note:
+        From openGUTS code:
+         Use the collected sample from parameter space to zoom in on the profile
+         likelihood for the single parameters. This is useful to extract
+         single-parameter CIs, but also to extend the sample with profiled sets.
+         The latter may be useful when sampling is poor in some part of parameter
+         space. Furthermore, the profiling does a number of optimisations (one
+         parameter fixed), which may spot a better value of the optimum.
+        
+         Strategy is to split up the parameter range for each parameter into 50
+         slices of equal width. Within each slice, look for the best-fitting set.
+         Use that set as starting point for an optimisation (with the target
+         parameter fixed to the middle of the slice). Also do another optimisation
+         from the optimised value in the previous slice. Sometimes, extending a
+         profile works better than taking the best available sample in the slice.
+         From these two optimisations, the best value is optimised again and
+         stored. Next, the profiling starts from the other side and calulates the
+         next version from the previous profile point. In some cases, extending a
+         profile from the other direction can find a better profile.
+        
+         Additionally, the algorithm is looking for situations where there is a
+         substantial difference between the profile and the sample. If that
+         happens in a relevant range (where the fit is still acceptable), the
+         points are collected and will be used for an additional round of sampling
+         (apparently, sampling was not optimal in that case). Note that the entire
+         profile will also be added to the total sample as they are relevant
+         parameter sets (this happens in <calc_parspace> at the end, when making
+         CIs).
+        """
+
         # without np.copy, the assignment is by reference
         # and the original array is modified. This creates
         # problems with the routine
@@ -505,13 +585,20 @@ class PyParspace:
         # include the best fit position in the grid
         bfitind = np.argwhere(par_rng <= coll_all[0,index]).flatten().max()
         par_rng = par_rng + (coll_all[0,index] - par_rng[bfitind])
-
+        
+        # The first thing to do is to run over the grid just made (based on the
+        # sample) and optimise in each interval to find the best point (which
+        # is the profile likelihood).
         for i_g in range(gridsz):
+            # find the best point in the sample within this slice
+            # In matlab this all process was done in a one liner, here had to be split
+            # into 3 lines
             ind_tst_tmp = np.argwhere(coll_all[:,index]>(par_rng[i_g]-gridsp)).flatten()
             ind_tst_tmp2 = np.argwhere(coll_all[:,index]<(par_rng[i_g]+gridsp)).flatten()
-            ind_tst = np.intersect1d(ind_tst_tmp,ind_tst_tmp2)
+            ind_tst = np.intersect1d(ind_tst_tmp,ind_tst_tmp2)  
+
             if ind_tst.size < 1:
-                # take the closest point
+                # take the closest point as the selection is empty
                 ind_tst = np.argmin(np.abs(coll_all[:,index] - par_rng[i_g]))
                 mll_compare = np.inf
             else:
@@ -522,8 +609,8 @@ class PyParspace:
             pmat_tst1[index] = par_rng[i_g]
             allpars = self._startp
             allpars[self.posfree]=pmat_tst1
-            posfree = np.delete(self.posfree,index)
-            
+            posfree = np.delete(self.posfree,index) # fix the parameter being profiled
+            # do the optimization with the selected point in the slice
             phat_tst1,mll_tst1 = self._NM_minimizer(np.delete(pmat_tst1,index),allpars, posfree, rough=0)
 
             allpars[self.posfree[index]] = par_rng[i_g]
@@ -532,6 +619,7 @@ class PyParspace:
 
             # this is done to see if a different starting point has a better chances
             if i_g>0:
+                # calling the variable with -2 to discriminate from the previous one
                 pmat_tst2 = np.copy(parprof[i_g-1,:-1]) # hard copy of arrays
                 pmat_tst2[index] = par_rng[i_g] 
                 allpars = self._startp
@@ -542,7 +630,7 @@ class PyParspace:
                 mll_tst2 = np.inf
             
             if (mll_tst2 < mll_tst1):
-                pmat_tst = allpars[self.posfree]
+                pmat_tst = allpars[self.posfree] # take the new values
 
             # # make a final fit using the best result obtianed (not a rough fit)
             phat_tst,mll_tst = self._NM_minimizer(np.delete(pmat_tst,index),allpars, posfree, rough = 0)
@@ -551,8 +639,13 @@ class PyParspace:
 
             # check for gaps and better optima
             if mll_tst < mll +chicrit_single+1:
+                # only if we are not clearly above the parameter's CI ...
+                # We don't care when there is a gap between profile and sample
+                # points in parts of parameter space that results in bad fits
+                # anyway.
                 if mll_compare - mll_tst > self.opts.gap_extra:
                     # here there is a better value found with the profile
+                    # put the sample point and the profile point in coll_ok
                     coll_ok[ind_ok,:]=coll_all[ind_tst,:]
                     coll_okL[ind_ok] =coll_allL[ind_tst]
                     coll_ok[ind_ok+1,:]=pmat_tst
@@ -594,6 +687,23 @@ class PyParspace:
 
         ## Extending the profile
         # Check and eventually extend the profile if we have not been catching all the space
+        #
+        # From OpenGUTS code:
+        # Note: Extending the profile is done in steps of <gridsp>, which is
+        # HALF of the distance between the regular profile points. This implies
+        # that extension is done on a finer grid. This was a mistake on my
+        # side, but I think it is okay to keep it in: extension is being done
+        # without the aid of sample points, so maybe a finer grid is a good
+        # idea. Will be a bit slow though. Also note that extension to lower
+        # values will generally be triggered when the sample is on the lower
+        # edge. This is caused by the fact that I shift the profiling grid
+        # slightly to higher values to catch the best value exactly. That is
+        # also not problematic.
+        #
+        # Start with profiling to lower values of the parameter,
+        # if needed. If we are not clearly above the parameter's CI yet, and
+        # haven't hit the lower bound ... continu further down until we are, or
+        # until we hit a boundary
         flag_disp = False
         while (parprof[0,index] > self.model.parbound_lower[self.posfree[index]]) & (parprof[0,-1] < mll+chicrit_single+1):
             if flag_disp == 0:
@@ -630,6 +740,7 @@ class PyParspace:
             pmat_tst[index] = min(pmat_tst[index], self.model.parbound_upper[self.posfree[index]])
             allpars = self._startp
             allpars[self.posfree]=pmat_tst
+            # double optimization here as the parameter space becomes difficult
             phat_tst,mll_tst = self._NM_minimizer(np.delete(pmat_tst,index), 
                                                   allpars, posfree, rough=0)
             phat_tst,mll_tst = self._NM_minimizer(phat_tst,
@@ -648,17 +759,15 @@ class PyParspace:
 
         if self.npars == 1:
                 parprof = np.column_stack((parprof[:,0], self._applylog(parprof[:,0])))
-        # collect these results in separate attributes, might be needed later
-        # self.coll_ok = np.append(coll_ok, coll_okL[:,None], axis=1)
-        # self.coll_ok = self.coll_ok[0:ind_ok,:]
-        # self.mll = mll
-        #self.pbest = pbest
+        # in the end coll_ok is returned by the function together with the profile and
+        # the best fit parameter set
         coll_ok = np.append(coll_ok, coll_okL[:,None], axis=1)
         coll_ok = coll_ok[0:ind_ok,:]
         return parprof, pbest, coll_ok
     
     # print on screen the results of the parameter space explorer.
     # This is a "private" method, not to be called from outside the class
+    # There is a wrapper written to reprint the results of the fit
     def _print_results(self, profile=None):
         if self.opts.profile:
             chicrit_single = 0.5 * self.opts.crit_table[0]
@@ -682,6 +791,8 @@ class PyParspace:
                     else:
                         ind_low = np.argwhere(prof_tst[:,-1] < 0).flatten().min()
                         if ind_low.size > 0:
+                            # need to interpolate to find the exact value. Interpolation done only on the 
+                            # two points around the crossing
                             val=np.interp(0, prof_tst[ind_low-1:ind_low,-1], prof_tst[ind_low-1:ind_low,i])
                             res_parspace[i,1] = (10**val*self.model.islog[self.posfree[i]] + 
                                                  val*(1-self.model.islog[self.posfree[i]]))
@@ -734,6 +845,7 @@ class PyParspace:
 
     # "private" method function that generates the figure with the sampling of 
     # the parameter space explorer includes arguments to save the resulting figure
+    # There is a wrapper written to replot the results of the fit
     def _plot_samples(self,profile=None, batchmode= False, savefig=False, figbasename="", extension=".png"):
         '''
         Plot the results of the parameter space explorer as a corner plot
@@ -880,7 +992,8 @@ class PyParspace:
     
         ind_cont = np.argwhere(coll_allL < mll+chicrit_rnd[0]).flatten().max()
         ind_cont = max(ind_cont, n_ok) # take at least n_ok points for the next iteration
-    
+        
+        # parameter sets that are carried to the next iteration
         coll_ok = coll_all[0:ind_cont,:]
         coll_okL = coll_allL[0:ind_cont]
     
@@ -889,8 +1002,8 @@ class PyParspace:
         coll_all = coll_all[mask,:]
         coll_allL = coll_allL[mask]
     
-        # % Check if we found a lot of ok values (that can for example happen when
-        # % the ranges are set much tighter by the user).
+        # Check if we found a lot of ok values (that can for example happen when
+        # the ranges are set much tighter by the user).
         print("So far best likelihood value is: %.4f"%mll)
         n_rnd = 2  # counter, we start from 2 because the first step is the first setup
         n_tr_i = n_tr[n_rnd-1]
@@ -925,12 +1038,18 @@ class PyParspace:
             mll = coll_allL[0]
     
             # check numbers of sets in the joint and inner rims
-            ind_final = np.argwhere(coll_allL < coll_allL[0]+chicrit_joint).flatten().max()
-            ind_single = np.argwhere(coll_allL < coll_allL[0]+chicrit_single).flatten().max()
-            ind_cont_t = np.argwhere(coll_triesL < coll_triesL[0]+chicrit_i).flatten().max()
-            ind_cont_a = np.argwhere(coll_allL < coll_allL[0]+chicrit_i).flatten().max()
-            ind_inner = np.argwhere(coll_allL < coll_allL[0]+chicrit_single+0.2).flatten().max()
-    
+            ind_final = np.argwhere(coll_allL < coll_allL[0]+chicrit_joint).flatten().max()   # index in <coll_all> for total joint CI
+            ind_single = np.argwhere(coll_allL < coll_allL[0]+chicrit_single).flatten().max() # index in <coll_all> for inner rim
+            ind_cont_t = np.argwhere(coll_triesL < coll_triesL[0]+chicrit_i).flatten().max()  # index in just-tried sets that qualify for continuation to next round
+            ind_cont_a = np.argwhere(coll_allL < coll_allL[0]+chicrit_i).flatten().max()      # index in <coll_all> that qualify for continuation to next round
+            ind_inner = np.argwhere(coll_allL < coll_allL[0]+chicrit_single+0.2).flatten().max()  # index for inner rim, with a little extra
+            
+            # From openGUTS code:
+            # Two additional indices (roughly for a 97.5% joint CI) in case we run
+            # into trouble (if we try too many new parameters with chicrit_i).
+            # These are indices to the last entry in the two matrices that still
+            # are within the total cloud that we like to calculate (slightly more
+            # than <chicrit_joint>).
             ind_cont_t2 = np.argwhere(coll_triesL < coll_triesL[0]+chicrit_max).flatten().max()
             ind_cont_a2 = np.argwhere(coll_allL < coll_allL[0]+chicrit_max).flatten().max()
     
@@ -938,6 +1057,16 @@ class PyParspace:
 
             ## GUTS only. Check for slow kinetic
             if ((((self.model.isfree[0]==1) & (self.model.isfree[2]==1)) & ((self.model.islog[2]==0) & (self.model.islog[0]==1))) & ((self.model.parbound_upper[2]/self.model.parbound_lower[2]) > 10)):                
+
+                # From openGUTS code:
+                # Only perform this check when both <kd> and <mw> are fitted, <mw>
+                # is still on normal scale, and <kd> is still on log-scale. If one
+                # of these things is different, the user has tampered with the
+                # parameter ranges and he/she is on his/her own! And, also don't do
+                # this check when the range of <mw> is less than a factor of 10
+                # (when the user has modified the range); for a small range, normal
+                # scale will generally suffice.
+
                 coll_tst = coll_all[:max(ind_final,n_ok),:]
                 min_zs = min(coll_tst[:,2])  # threshold parameter (zs)
                 min_kd = min(coll_tst[:,0])  # dynamic rate parameter
@@ -959,6 +1088,9 @@ class PyParspace:
                         # the threshold parameter (from linear to log)
                         return (slwkin,lowerv,upperv)
     
+            # This block is aiming to make sure
+            # not to try too few or too many points in the next round, but select
+            # an efficient set for continuation in <coll_ok>.
             if ind_final > n_conf[0]:      # checking if the outer rim has enough values (see options)
                 if ind_single > n_conf[1]: # checking if the inner rim has enough values (see options)
                     print('  Stopping criterion met: ',ind_final,' sets within total CI and ',ind_single,' within inner')
@@ -968,10 +1100,10 @@ class PyParspace:
                     coll_ok = coll_all[0:ind_inner]
                     coll_okL = coll_allL[0:ind_inner]
                     flag_inner = 1
-                    if ind_inner < n_ok:
+                    if ind_inner < n_ok:  # if there are very few currently in the inner rim, take the <n_ok> best ones from <coll_all>
                         coll_ok = coll_all[0:n_ok]
                         coll_okL = coll_allL[0:n_ok]
-                    elif (ind_inner>0.5*n_conf[1]):
+                    elif (ind_inner>0.5*n_conf[1]): #if we already have quite some values in inner rim
                         limits = [max(0, ind_single-n_ok), ind_single+n_ok]
                         coll_ok = coll_all[limits[0]:limits[1]]
                         coll_okL = coll_allL[limits[0]:limits[1]]
@@ -980,16 +1112,24 @@ class PyParspace:
                         coll_okL = np.append(coll_allL[0], coll_okL) 
             else:
                 # not enough values in the joint dataset
-                if ind_cont_t > n_ok:
-                    if ind_cont_t > 2*n_conf[0]:
-                        if ind_final > 0.5*n_conf[0]:
+                if ind_cont_t > n_ok:  
+                # From openGUTS code: if there are enough in <coll_tries> to continue with ...
+                # in principle, the next round will continue from sets in
+                # <coll_tries> and not from <coll_all>. The reason is that it is
+                # better to propagate new sets than to continue propagating
+                # sets that have been propagated before already.
+                    if ind_cont_t > 2*n_conf[0]: # if we will try more than 2 times of what we finally need
+                        if ind_final > 0.5*n_conf[0]: # if we already have half the values we need
+                            # focus on the edge of the inner rim as there more precision
+                            # is needed
                             limits=[max(0,ind_single-n_ok),min(ind_cont_t,ind_single+n_ok)]
                             coll_ok = coll_tries[limits[0]:limits[1]]
                             coll_okL = coll_triesL[limits[0]:limits[1]]
-                        else:
+                        else: # then we have a lot of values to try, but not so much accepted yet
                             if coll_triesL[2*n_conf[0]] > mll + chicrit_max:
                                 ind_cont_t = 2*n_conf[0]
                             else:
+                                # then it is not a good idea to limit continuation to 2 * <n_conf(0)>
                                 ind_cont_t = ind_cont_t2
                             coll_ok  = coll_tries[0:ind_cont_t]
                             coll_okL = coll_triesL[0:ind_cont_t]
@@ -999,6 +1139,7 @@ class PyParspace:
                     coll_ok = np.append([coll_all[0]], coll_ok, axis=0)
                     coll_okL = np.append(coll_allL[0], coll_okL)
                 else:
+                    # there are NOT enough values in <coll_tries> to continu with ... then we need to look at <coll_all>
                     if ind_cont_a > n_ok:
                         if ind_cont_a > 2 * n_conf[0]:
                             if coll_allL[2*n_conf[0]] > mll + chicrit_max:
@@ -1011,6 +1152,11 @@ class PyParspace:
                         coll_ok = coll_all[0:n_ok]
                         coll_okL = coll_allL[0:n_ok]
     
+            # From openGUTS code: See if we need a new round, and if so, prepare for it.
+            # Again, special care is taken to avoid taking too few or too many new
+            # tries in the next round. Therefore, the tricky part is to come up
+            # with an efficient value for <n_tr_i> (number of random mutations per
+            # set in the next round).
             if (n_rnd == n_max) & (flag_stop == False):
                 # the loop stops anyway here as maximum number of tries is reached
                 flag_stop = True
@@ -1025,19 +1171,32 @@ class PyParspace:
                 f_d_i = f_d[-1]
                 chicrit_i = chicrit_rnd[-1]
             
+            #  Modify number of tries if we have a lot or only few sets within the total cloud or inner rim.
             crit_ntry = [ ind_final/n_conf[0], ind_single/n_conf[1] ]
             if (crit_ntry[flag_inner] > 0.75) | (len(coll_okL) > 2000):
-                n_tr_i = np.floor(n_tr_i/2)
-            elif n_rnd > 3:
+                # If we already have more than 75% of what we finally need, or more than 2000 sets to continue with
+                # Note: when <flag_inner> = 1, we look at the status of the inner rim!
+                n_tr_i = np.floor(n_tr_i/2) # decrease the number of tries per set for next round
+            elif n_rnd > 3: # starting at round 4, we start to worry if we haven't found so many yet
                 if (len(coll_okL) < 0.5*n_conf[flag_inner]) & (len(coll_okL) < 1000):
-                    n_tr_i = 2* n_tr_i
+                    # If we have less than 50% of what we finally need, and less than 1000 sets to try next
+                    n_tr_i = 2* n_tr_i  # double number of tries
                     if (n_rnd > 4) & (crit_ntry[flag_inner] < 0.25):
                         n_tr_i = 2*n_tr_i
                 elif n_rnd > 7:
                     n_tr_i = 2*n_tr_i
             
             n_tr_i = min(n_tr_i, max(2, np.floor(10*n_conf[flag_inner]/len(coll_okL))))
-    
+            # From openGUTS code: 
+            # This allows a max of 10x the target value to be tried in the next
+            # round (scaling back <n_tr_i>). Well, sometimes more, as at least
+            # 2 tries will be allowed for each set in <coll_ok>. I used to have
+            # a check for whether we are in the final rounds or if we found
+            # very little, but I don't think that is needed (and sometimes
+            # leads to large numbers of new tries). If all fails, the extra
+            # sampling rounds will come to the rescue.
+
+
             # TODO further testing, maybe make a separate function for it, like in BYOM
             # pruning option.
             mask=coll_allL < mll+chicrit_max
@@ -1083,6 +1242,8 @@ class PyParspace:
                                extension=extension)    
         else:
             # perform a profile likelihood to determine the confidence intervals
+            # if the profiling process finds a new minimum, we run further
+            # optimization from there
             print("Starting round ",n_rnd," for profile likelihood of each parameter")
             parprofile=[0]*n_cores
             pbest = np.zeros((self.npars,self.npars+1))
@@ -1092,6 +1253,7 @@ class PyParspace:
             # sequential implementation replaced with parallel implementation
             # for i in range(self.npars):
             #     parprofile.append(self._parameter_profile_sub(i))
+            # each parameter sent to a different core
             with mp.Pool(n_cores) as pool:
                 results = pool.starmap(parameter_profile_sub_wrapper, [(i, self) for i in range(self.npars)])
                 parprofile, pbest, coll_ok = zip(*results)
@@ -1132,6 +1294,7 @@ class PyParspace:
                     n_cont = self.coll_ok.shape[0]
                     n_rnd_x = n_rnd_x+1
 
+                    # set a reasonable number of new tries
                     n_tr_i = 40
                     n_tr_i = int(min(n_tr_i,max(2, np.floor(5*n_conf[1]/n_cont))))
 
@@ -1154,12 +1317,23 @@ class PyParspace:
                     # print("size coll_all ",self.coll_all.shape)
                     # print("ind_final: ",ind_final)
                     # print("ind_single: ",ind_single)
+
+                    # From openGUTS code: Run a test to see whether the sample now DOES match
+                    # the profile likelihood. It checks where the profile is
+                    # considerably lower than the sample (which means that more
+                    # sampling is needed), and when the sample is lower than the
+                    # profile (which means we may need a new profile).
                     flag_profile=self._test_profile(self.coll_all, parprofile, self.opts)
                     # print(self.coll_ok)
                     # print("flag_profile")
                     # print(flag_profile) # DEBUG
                     if ind_single < n_conf[1]:
-                        ind_cont = np.argwhere(coll_tries[:,-1] < mll+self.opts.crit_add_extra).flatten().max()
+                        # Are more samples needed? First check in the inner rim 
+
+                        # In the openGUTS code there is a warining that theoretically this could lead
+                        # to an infinite loop, but it is also written that in practice it would be
+                        # highly unlikly that a continuous sampling would not fill the inner rim
+                        ind_cont = np.argwhere(coll_tries[:,-1] < mll+self.opts.crit_add_extra).flatten().max() # only continue with new tries that are close to inner rim
                         if ind_cont < (0.5 * n_conf[1]):
                             self.coll_ok = np.append(self.coll_ok, coll_tries[0:ind_cont,:], axis=0)
                         else:
