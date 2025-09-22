@@ -1213,7 +1213,7 @@ class PyParspace:
             mask = np.sum(coll_all[1:]==coll_all[:-1], axis=1)
             coll_all = np.append([coll_all[0]], coll_all[1:,:][mask!=self.npars], axis=0)
             coll_allL = np.append(coll_allL[0], coll_allL[1:][mask!=self.npars])
-            print("Removed ", sum(mask), " duplicate values")
+            print("Removed ", np.sum(mask==self.npars), " duplicate values")
         print('Loop is over')
     
         # perform now a simplex optimization
