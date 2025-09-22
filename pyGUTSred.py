@@ -1056,7 +1056,7 @@ class pyGUTSred(parspace.PyParspace):
         islog (numpy.ndarray): Boolean array indicating which parameters are logarithmic.
         isfree (numpy.ndarray): Boolean array indicating which parameters are free to vary.
     Methods:
-        __init__(datafile, variant, hbfree=True, preset=True, parvalues=None, lbound=None, ubound=None, islog=None, isfree=None, profile=True, rough=False):
+        __init__(datafile, variant, hbfree=True, hblims=[1e-6,0.07],preset=True, parvalues=None, lbound=None, ubound=None, islog=None, isfree=None, profile=True, rough=False):
             Initializes the pyGUTSred object with calibration data and model parameters.
         _preset_pars():
             Sets initial parameter values and bounds for the GUTS model.
@@ -1079,9 +1079,18 @@ class pyGUTSred(parspace.PyParspace):
                  datafile,
                  variant,
                  hbfree = True,
+                 hblims = [1e-6, 0.07],
                  preset=True,parvalues=None,lbound=None,ubound=None,islog=None,isfree=None,
                  profile=True,
                  rough=False):
+        # initialize the all the objects
+        # if the user wants to keep the default presetting routine, but
+        # slighlty change the hblims, this is possible using the corresponding
+        # argument. This improves flexibility, while keeping the presetting
+        # for all the other GUTS parameters (for which the presetting is more
+        # important)
+        # hblims[0] is set to 1e-6 : do not set completely to 0, but give a very small number
+        # hblims[1] is set to 0.07 : corresponing to ~23% mortality after 21 days
         self.variant = variant
         self.hbfree = hbfree
         self.calibpath = datafile
@@ -1126,7 +1135,7 @@ class pyGUTSred(parspace.PyParspace):
             self.parnames = self.parnames+["hb%d"%(i+1)]
         if preset:
             # run the preset function that operates like in openGUTS
-            self._preset_pars()
+            self._preset_pars(hblims)
         else:
             # in this case the user needs to insert the values
             self.parvals = parvalues
@@ -1159,7 +1168,7 @@ class pyGUTSred(parspace.PyParspace):
         # or just go in batchmode
         # self.plot_data_model(fit=0) 
 
-    def _preset_pars(self):
+    def _preset_pars(self, hblims):
         """
         Initial settings of the parameters for the GUTS model.
         This method sets the bounds of the parameters
@@ -1176,8 +1185,8 @@ class pyGUTSred(parspace.PyParspace):
         # each dataset
         if self.hbfree:
             self.isfree[-self.ndatasets:] = 1
-        self.lbound[-self.ndatasets:] = 1e-6  # do not set completely to 0, but give a very small number
-        self.ubound[-self.ndatasets:] = 0.07  # upperlimit for hb (corresponing to ~23% mortality after 21 days). 
+        self.lbound[-self.ndatasets:] = hblims[0] 
+        self.ubound[-self.ndatasets:] = hblims[1]  
 
         tmptime = []
         tmpconcm = []
