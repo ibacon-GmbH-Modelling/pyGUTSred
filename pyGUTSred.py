@@ -1253,18 +1253,40 @@ class pyGUTSred(parspace.PyParspace):
     def fit_hb(self):
         """
         Fit the hazard rate to control data for each dataset.
-        The routine uses a standard Nelder-Mead optimization method to find the best fit
+        The routine uses a standard L-BFGS-B optimization method to find the best fit
         for the hazard rate parameter (hb) in the GUTS model.
+
+        To avoid local minima, the fitting is performed using a basinhopping
+        global optimization algorithm with L-BFGS-B as local minimizer.
+        This might be an overkill, but there are cases in which the
+        fit will be stuck in local minima and this should help preventing it.
         """
         for i in range(self.ndatasets):
-            res = sp.optimize.minimize(models.hb_fit_ll, 
-                                   x0=self.parvals[2+(i+1)], 
-                                   args=(self.datastruct[i].timetreat[0],self.datastruct[i].deatharraytreat[0]),
-                                   method='Nelder-Mead',
-                                   bounds=[(self.lbound[2+(i+1)], self.ubound[2+(i+1)])])
+            minimizer_kwargs = {"method": "L-BFGS-B",
+                                "bounds":[(self.lbound[2+(i+1)],
+                                           self.ubound[2+(i+1)])],
+                                "args":(self.datastruct[i].timetreat[0],
+                                        self.datastruct[i].deatharraytreat[0])}
+            res=sp.optimize.basinhopping(models.hb_fit_ll,
+                                         x0=self.parvals[2+(i+1)],
+                                         niter=5,
+                                         minimizer_kwargs=minimizer_kwargs)
+            if res.success == False:
+                print("**** Warning: the fit of hb for dataset %d did not converge"%(i+1))
             self.parvals[2+(i+1)] = res.x
             print("hb fitted to control data for dataset %d: %.4f"%(i+1,self.parvals[2+(i+1)]))
-            # Add a verbose option?? TO show additional diagnostics on the fit?
+            # as we are using the L-BFGS-B method, we can also extract the information
+            # on the estimated standard deviation of the fitted parameter (as it is
+            # derived by the inverse of the hessian matrix)
+            print("Estimate of uncertainty (standard deviation): %.4f"%
+                  (np.sqrt(res.lowest_optimization_result.hess_inv.todense())))
+            # if (res.x-self.lbound[2+(i+1)])/self.lbound[2+(i+1)] <= 1e-2:
+            #     print("**** Warning: fitted hb is close to the lower bound")
+            # show warning only for the upper bound, as the fit is expected to
+            # often hit the lower boundary.
+            if (self.ubound[2+(i+1)]-res.x)/self.ubound[2+(i+1)] <= 1e-2:
+                print("**** Warning: fitted hb is close to the upper bound")
+            # Add a verbose option?? To show additional diagnostics on the fit?
 
     def run_and_time_parspace(self,batchmode=True,savefig=False,figbasename="fit",extension=".png"):
         """
