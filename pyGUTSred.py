@@ -1090,7 +1090,7 @@ class pyGUTSred(parspace.PyParspace):
         # for all the other GUTS parameters (for which the presetting is more
         # important)
         # hblims[0] is set to 1e-6 : do not set completely to 0, but give a very small number
-        # hblims[1] is set to 0.07 : corresponing to ~23% mortality after 21 days
+        # hblims[1] is set to 0.07 : corresponing to ~23% survival after 21 days
         self.variant = variant
         self.hbfree = hbfree
         self.calibpath = datafile
@@ -1222,7 +1222,7 @@ class pyGUTSred(parspace.PyParspace):
             # limits for bs
             # FROM openGUTS code comments:
             # Min is 10% effect at end of test when fast kinetics and threshold
-            # zero. Max is that what you gain in damage in one hour, at lowest
+            # zero. Max is that what you gain in damage in one hour, at maximum
             # exposure, at minimum <kd>, is enough to kill you (95% sure) in 1 hour.
             self.lbound[1] = -np.log(0.9)/(cmax*tmax)
             self.ubound[1] = (24**2*0.95)/(self.lbound[0]*cmax*np.exp(-self.lbound[0]*tmax*0.5))
