@@ -579,7 +579,7 @@ class PyParspace:
         parprof = np.zeros((gridsz,npars+1))
 
         parnr = self.posfree[index]
-        edges = np.array([min(coll_all[:ind_final,index]), max(coll_all[:ind_final,index])])
+        edges = np.array([min(coll_all[:ind_final+1,index]), max(coll_all[:ind_final+1,index])])
         par_rng = np.linspace(edges[0],edges[1],gridsz)
         gridsp = 0.5 * (edges[1] - edges[0])/(gridsz-1) # why do I need this again when I have par_rng
         # include the best fit position in the grid
@@ -793,7 +793,7 @@ class PyParspace:
                         if ind_low.size > 0:
                             # need to interpolate to find the exact value. Interpolation done only on the 
                             # two points around the crossing
-                            val=np.interp(0, prof_tst[ind_low-1:ind_low,-1], prof_tst[ind_low-1:ind_low,i])
+                            val=np.interp(0, prof_tst[ind_low-1:ind_low+1,-1], prof_tst[ind_low-1:ind_low+1,i])
                             res_parspace[i,1] = (10**val*self.model.islog[self.posfree[i]] + 
                                                  val*(1-self.model.islog[self.posfree[i]]))
                     if prof_tst[-1,-1] < 0:
@@ -804,8 +804,8 @@ class PyParspace:
                     else:
                         ind_up = np.argwhere(prof_tst[:,-1] < 0).flatten().max()
                         if ind_up.size > 0:
-                            val = np.interp(0, prof_tst[ind_up:ind_up+1,-1],
-                                            prof_tst[ind_up:ind_up+1,i])
+                            val = np.interp(0, prof_tst[ind_up:ind_up+1+1,-1],
+                                            prof_tst[ind_up:ind_up+1+1,i])
                             res_parspace[i,2] = (10**(val)*self.model.islog[self.posfree[i]] +
                                                      (val)*(1-self.model.islog[self.posfree[i]]))
                     num_x = np.sum(np.diff(np.sign(prof_tst[:,-1]))!=0)
@@ -831,8 +831,8 @@ class PyParspace:
             ind_prop2 = np.argwhere(coll_all[:,-1] < mll + 0.5 * self.opts.crit_prop[1]).flatten().max()
             res_parspace = np.zeros((self.npars,3))
             res_parspace[:,0] = (10**(coll_all[0,:-1])*self.model.islog + coll_all[0,:-1]*(1-self.model.islog)).transpose()
-            res_parspace[:,1] = 10**(coll_all[ind_prop1:ind_prop2,:-1].min(axis=0))*self.model.islog + (coll_all[ind_prop1:ind_prop2,:-1].min(axis=0))*(1-self.model.islog)
-            res_parspace[:,2] = 10**(coll_all[ind_prop1:ind_prop2,:-1].max(axis=0))*self.model.islog + (coll_all[ind_prop1:ind_prop2,:-1].max(axis=0))*(1-self.model.islog)
+            res_parspace[:,1] = 10**(coll_all[ind_prop1:ind_prop2+1,:-1].min(axis=0))*self.model.islog + (coll_all[ind_prop1:ind_prop2+1,:-1].min(axis=0))*(1-self.model.islog)
+            res_parspace[:,2] = 10**(coll_all[ind_prop1:ind_prop2+1,:-1].max(axis=0))*self.model.islog + (coll_all[ind_prop1:ind_prop2+1,:-1].max(axis=0))*(1-self.model.islog)
             print("The results here are obtained from the paramter space explorer without profiling option.")
             print("Best fit values and CI estimates could be considered as estimates")
             print("Best fit likelihood: %.2f"%mll)
@@ -870,8 +870,8 @@ class PyParspace:
         mll = self.coll_all[0,-1]
         ind_single = np.argwhere(self.coll_all[:,-1] < (mll + chicrit_single)).flatten().max()
         ind_fin95 = np.argwhere(self.coll_all[:,-1] < (mll + chicrit_joint)).flatten().max()
-        coll_inner = self.coll_all[0:ind_single]
-        coll_joint = self.coll_all[ind_single+1:ind_fin95]
+        coll_inner = self.coll_all[0:ind_single+1]
+        coll_joint = self.coll_all[ind_single+1:ind_fin95+1]
         ind_prop1 = np.argwhere(self.coll_all[:,-1] < mll + 0.5 * self.opts.crit_prop[0]).flatten().max()
         ind_prop2 = np.argwhere(self.coll_all[:,-1] < mll + 0.5 * self.opts.crit_prop[1]).flatten().max()
         handles=[]
@@ -889,12 +889,12 @@ class PyParspace:
                     ax[i,j].plot(coll_inner[:,i], coll_inner[:,-1]-mll, ".", color="tab:green", label="Inner CI")
                     ax[i,j].plot(best_set[i], 0, "o", color="tab:red", label="Best fit")
                     ax[i,j].hlines(0.5 * self.opts.crit_prop[0], 
-                                   self.coll_all[ind_prop1:ind_prop2,i].min(axis=0),
-                                   self.coll_all[ind_prop1:ind_prop2,i].max(axis=0),
+                                   self.coll_all[ind_prop1:ind_prop2+1,i].min(axis=0),
+                                   self.coll_all[ind_prop1:ind_prop2+1,i].max(axis=0),
                                    linestyle=':',color='k', label="95% CI for propagation")
                     ax[i,j].hlines(0.5 * self.opts.crit_prop[1],
-                                   self.coll_all[ind_prop1:ind_prop2,i].min(axis=0),
-                                   self.coll_all[ind_prop1:ind_prop2,i].max(axis=0),
+                                   self.coll_all[ind_prop1:ind_prop2+1,i].min(axis=0),
+                                   self.coll_all[ind_prop1:ind_prop2+1,i].max(axis=0),
                                    linestyle=':',color='k')
                     ax[i,j].hlines(chicrit_single,
                                    self.coll_all[ind_prop1:ind_prop2,i].min(axis=0),
@@ -994,8 +994,8 @@ class PyParspace:
         ind_cont = max(ind_cont, n_ok) # take at least n_ok points for the next iteration
         
         # parameter sets that are carried to the next iteration
-        coll_ok = coll_all[0:ind_cont,:]
-        coll_okL = coll_allL[0:ind_cont]
+        coll_ok = coll_all[0:ind_cont+1,:]
+        coll_okL = coll_allL[0:ind_cont+1]
     
         # remove points above the maximum
         mask = coll_allL < mll+chicrit_max
@@ -1097,16 +1097,16 @@ class PyParspace:
                     flag_stop = True
                 else:
                     print("Next round will be focussed on the inner rim (outer rim has enough values)")
-                    coll_ok = coll_all[0:ind_inner]
-                    coll_okL = coll_allL[0:ind_inner]
+                    coll_ok = coll_all[0:ind_inner+1]
+                    coll_okL = coll_allL[0:ind_inner+1]
                     flag_inner = 1
                     if ind_inner < n_ok:  # if there are very few currently in the inner rim, take the <n_ok> best ones from <coll_all>
                         coll_ok = coll_all[0:n_ok]
                         coll_okL = coll_allL[0:n_ok]
                     elif (ind_inner>0.5*n_conf[1]): #if we already have quite some values in inner rim
                         limits = [max(0, ind_single-n_ok), ind_single+n_ok]
-                        coll_ok = coll_all[limits[0]:limits[1]]
-                        coll_okL = coll_allL[limits[0]:limits[1]]
+                        coll_ok = coll_all[limits[0]:limits[1]+1]
+                        coll_okL = coll_allL[limits[0]:limits[1]+1]
                         # add the optimized values
                         coll_ok = np.append([coll_all[0]], coll_ok, axis=0)
                         coll_okL = np.append(coll_allL[0], coll_okL) 
@@ -1123,19 +1123,19 @@ class PyParspace:
                             # focus on the edge of the inner rim as there more precision
                             # is needed
                             limits=[max(0,ind_single-n_ok),min(ind_cont_t,ind_single+n_ok)]
-                            coll_ok = coll_tries[limits[0]:limits[1]]
-                            coll_okL = coll_triesL[limits[0]:limits[1]]
+                            coll_ok = coll_tries[limits[0]:limits[1]+1]
+                            coll_okL = coll_triesL[limits[0]:limits[1]+1]
                         else: # then we have a lot of values to try, but not so much accepted yet
                             if coll_triesL[2*n_conf[0]] > mll + chicrit_max:
                                 ind_cont_t = 2*n_conf[0]
                             else:
                                 # then it is not a good idea to limit continuation to 2 * <n_conf(0)>
                                 ind_cont_t = ind_cont_t2
-                            coll_ok  = coll_tries[0:ind_cont_t]
-                            coll_okL = coll_triesL[0:ind_cont_t]
+                            coll_ok  = coll_tries[0:ind_cont_t+1]
+                            coll_okL = coll_triesL[0:ind_cont_t+1]
                     else:
-                        coll_ok  = coll_tries[0:ind_cont_t]
-                        coll_okL = coll_triesL[0:ind_cont_t]
+                        coll_ok  = coll_tries[0:ind_cont_t+1]
+                        coll_okL = coll_triesL[0:ind_cont_t+1]
                     coll_ok = np.append([coll_all[0]], coll_ok, axis=0)
                     coll_okL = np.append(coll_allL[0], coll_okL)
                 else:
@@ -1146,8 +1146,8 @@ class PyParspace:
                                 ind_cont_a = 2*n_conf[0]
                             else:
                                 ind_cont_a = ind_cont_a2
-                        coll_ok = coll_all[0:ind_cont_a]
-                        coll_okL = coll_allL[0:ind_cont_a]
+                        coll_ok = coll_all[0:ind_cont_a+1]
+                        coll_okL = coll_allL[0:ind_cont_a+1]
                     else:
                         coll_ok = coll_all[0:n_ok]
                         coll_okL = coll_allL[0:n_ok]
@@ -1232,7 +1232,7 @@ class PyParspace:
             ind_prop1 = np.argwhere(self.coll_all[:,-1] < mll + 0.5 * self.opts.crit_prop[0]).flatten().max()
             ind_prop2 = np.argwhere(self.coll_all[:,-1] < mll + 0.5 * self.opts.crit_prop[1]).flatten().max()
             self.pbest = self.coll_all[0,:]
-            self.propagationset = self.coll_all[ind_prop1:ind_prop2,:-1]
+            self.propagationset = self.coll_all[ind_prop1:ind_prop2+1,:-1]
             self.model.parvals[self.posfree] = self.pbest[:-1]
             self.fullset = np.copy(self.model.parvals)
             print("Final results:")
@@ -1277,7 +1277,7 @@ class PyParspace:
                 # resampling will be needed
                 if (self.coll_ok.size < 1) | ((ind_single < n_conf[1]) & (self.coll_ok.shape[0] < 10)):
                     self.coll_ok = np.append(self.coll_ok, self.coll_all[max(0,ind_single-n_ok):min(ind_single+n_ok,self.coll_all.shape[0])], axis=0)
-                coll_tmp    = np.append(self.coll_ok[:,:-1] , self.coll_all[0:ind_final,:-1], axis=0)
+                coll_tmp    = np.append(self.coll_ok[:,:-1] , self.coll_all[0:ind_final+1,:-1], axis=0)
                 edges_cloud = np.array([coll_tmp.min(axis=0), coll_tmp.max(axis=0)])
                 # TODO remove coll_tmp
                 d_grid = self.opts.d_extra * (edges_cloud[1] - edges_cloud[0])
@@ -1335,9 +1335,9 @@ class PyParspace:
                         # highly unlikly that a continuous sampling would not fill the inner rim
                         ind_cont = np.argwhere(coll_tries[:,-1] < mll+self.opts.crit_add_extra).flatten().max() # only continue with new tries that are close to inner rim
                         if ind_cont < (0.5 * n_conf[1]):
-                            self.coll_ok = np.append(self.coll_ok, coll_tries[0:ind_cont,:], axis=0)
+                            self.coll_ok = np.append(self.coll_ok, coll_tries[0:ind_cont+1,:], axis=0)
                         else:
-                            self.coll_ok = coll_tries[0:ind_cont,:]
+                            self.coll_ok = coll_tries[0:ind_cont+1,:]
                         f_d_i = max(0.1, f_d_i * 0.7) # reduce jump size so as to contract the extra sampling
                     elif (self.coll_ok.shape[0] > 0) & (n_rnd_x<5):
                         f_d_i = max(0.1,f_d_i * 0.7)
@@ -1387,7 +1387,7 @@ class PyParspace:
             
             ind_prop1 = np.argwhere(self.coll_all[:,-1] < mll + 0.5 * self.opts.crit_prop[0]).flatten().max()
             ind_prop2 = np.argwhere(self.coll_all[:,-1] < mll + 0.5 * self.opts.crit_prop[1]).flatten().max()
-            self.propagationset = self.coll_all[ind_prop1:ind_prop2,:-1]
+            self.propagationset = self.coll_all[ind_prop1:ind_prop2+1,:-1]
         return (0,0,0)
     
     def replot_results(self, batchmode=False, savefig=False, figbasename="", extension=".png"):
