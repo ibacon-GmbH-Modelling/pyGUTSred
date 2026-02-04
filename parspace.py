@@ -13,7 +13,7 @@ on AI technology.
 
 =======================================================================
 Copyright (c) 2018-2024, Tjalling Jager (tjalling@debtox.nl)
-Copyright (c) 2025, Carlo Romoli - ibacon GmbH (carlo.romoli AT ibacon.com)
+Copyright (c) 2025-2026, Carlo Romoli - ibacon GmbH (carlo.romoli AT ibacon.com)
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
 the Free Software Foundation; either version 3 of the License, or
