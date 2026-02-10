@@ -41,7 +41,7 @@ In order to use the code, the following addittional packages are needed:
 The code runs with python3. Good results in terms of interactivity are reached when used in a `ipython` terminal.
 
 ## Usage
-The code relies on the following files:
+The code relies on the following files (inside the pyGUTSred folder):
 * models.py
 * parspace.py
 * pyGUTSred.py
@@ -54,16 +54,15 @@ The file `parspace.py` contains the parameter space explorer algorithm adapted f
 The file `pyGUTSred.py` contains the all the general framework and additional functions to run a complete GUTS modelling
 analysis.
 
-Place the three files either in your working directory or in a different folder that is added to your `PYTHONPATH` as in the following
+Place the `pyGUTSred` folder in your working directory or in a different folder that is added to your `PYTHONPATH` as in the following
 
 ```python
 import sys
-sys.path.append('/path/to/your/folder/with/the/pygutsred/scripts')
+sys.path.append('/path/to/pyGUTSred/folder')
 ```
 
 For a basic usage see the script `example_run.py`, while for a more detailed view of all the main functionalities, look at the jupyter notebook `use_example.ipynb`
 
 (**NOTE 1**: the example script runs under the assumption that they are placed in the same directory as the 3 source files)
 
-(**NOTE 2**: In a future iteration I will structure the scripts in the form of a python package
-for an easier installation and usage)
+(**NOTE 2**: In a future iteration I will provide with a proper package installable with pip)

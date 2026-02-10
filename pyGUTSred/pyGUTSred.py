@@ -122,8 +122,8 @@ import time
 import pandas as pd
 import numpy as np
 import scipy as sp
-import models
-import parspace
+import pyGUTSred.models as models
+import pyGUTSred.parspace as parspace
 import matplotlib.pyplot as plt
 
 from copy import deepcopy
