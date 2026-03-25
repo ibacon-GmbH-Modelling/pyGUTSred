@@ -462,6 +462,7 @@ def plot_data_model(fit, datastruct, concstruct, model, propagationset, modellab
                 ax2[1].plot([0,maxdeaths],[0,maxdeaths], 'k--',lw=0.5,label='')
                 ax2[0].legend(loc='lower right')
                 if (fit>1) & (propagationset is not None):
+                    counter = 0
                     for i in range(dataset.ntreats):
                         damlines = np.zeros((len(propagationset),len(dataset.timeext[i])))
                         surlines = np.zeros((len(propagationset),len(dataset.timeext[i])))
@@ -487,6 +488,10 @@ def plot_data_model(fit, datastruct, concstruct, model, propagationset, modellab
                                         yerr=[survmodelprob[i]-surlinedown[dataset.index_commontime[i]],
                                               surlineup[dataset.index_commontime[i]]-survmodelprob[i]], fmt='none',
                                               ecolor='k', zorder = 0)
+                        maskcross1to1 = (((surlineup[dataset.index_commontime[i]] - dataset.survprobstreat[i])>0) & ((dataset.survprobstreat[i] - surlinedown[dataset.index_commontime[i]])>0))
+                        counter = counter + sum(maskcross1to1)
+                totalpoints=sum([len(dataset.survprobstreat[k]) for k in range(dataset.ntreats)])
+                print("Point crossing 1:1 line in observed vs predicted survival probability plot: %d out of %d (%.2f%%)"%(counter, totalpoints,counter/totalpoints*100))
                 fig2.suptitle("Dataset %d"%(nd+1))
                 fig2.tight_layout()
             fig.suptitle("Dataset %d"%(nd+1))
