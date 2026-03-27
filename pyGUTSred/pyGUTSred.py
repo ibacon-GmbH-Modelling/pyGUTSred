@@ -361,7 +361,9 @@ def lcx_calculation(model, timepoints=[2,4,10,21], levels=[0.1,0.2,0.5], propaga
         print(values)
     return([LCx, LCxlo, LCxup])
 
-def plot_data_model(fit, datastruct, concstruct, model, propagationset, modellabel='model', add_obspred=True, savefig=False, figname='', extension='.png'):
+def plot_data_model(fit, datastruct, concstruct, model, propagationset, 
+                    modellabel='model', add_obspred=True, savefig=False, 
+                    figname='', extension='.png', ppc_check=True, valflag=False):
     """
     Function to plot experimental data, model predictions, and optionally confidence intervals.
 
@@ -390,6 +392,11 @@ def plot_data_model(fit, datastruct, concstruct, model, propagationset, modellab
         Base filename for saving plots. Default is an empty string.
     extension : str, optional
         File extension for saving plots (e.g., '.png', '.jpg'). Default is '.png'.
+    ppc_check : bool, optional
+        If True, performs an equivalent check to a posterior predictive check (ppc is only for Bayesian statistic)
+        by analyzing the coverage of the confidence intervals. Default is True.
+    valflag : bool, optional
+        Signal that the plotting function has been called from the validation function in order to adjust printouts.
 
     Notes:
     ------
@@ -400,7 +407,10 @@ def plot_data_model(fit, datastruct, concstruct, model, propagationset, modellab
     - The function supports saving plots to files if `savefig` is True.
     """
     if fit in [0,1,2]:
+        if ppc_check:
+            print("**** Check on CI coverage in observed vs predicted survival probability plot ****")
         for nd in range(len(datastruct)):
+            titlestring = "Dataset %d. "%(nd+1)
             dataset = datastruct[nd]
             concset = concstruct[nd]
             fig = plt.figure()
@@ -427,6 +437,9 @@ def plot_data_model(fit, datastruct, concstruct, model, propagationset, modellab
             ax[1,0].set_ylabel("Survival")
             plt.tight_layout()
             if fit>0:
+                titlestring = "Dataset %d. Data and calibrated %s model"%(nd+1,model.variant)
+                if valflag:
+                    titlestring = "Dataset %d. Validation data and previously calibrated %s model"%(nd+1,model.variant)
                 modelpars = np.copy(10**model.parvals*model.islog + model.parvals*(1-model.islog))
                 modelpars = modelpars[[0,1,2]+[3+nd]]
                 #survmodelprob = np.zeros_like(dataset.survprobs)
@@ -462,7 +475,8 @@ def plot_data_model(fit, datastruct, concstruct, model, propagationset, modellab
                 ax2[1].plot([0,maxdeaths],[0,maxdeaths], 'k--',lw=0.5,label='')
                 ax2[0].legend(loc='lower right')
                 if (fit>1) & (propagationset is not None):
-                    counter = 0
+                    counter = 0 # needed for PPC check
+                    counter_wCI=0
                     for i in range(dataset.ntreats):
                         damlines = np.zeros((len(propagationset),len(dataset.timeext[i])))
                         surlines = np.zeros((len(propagationset),len(dataset.timeext[i])))
@@ -488,13 +502,30 @@ def plot_data_model(fit, datastruct, concstruct, model, propagationset, modellab
                                         yerr=[survmodelprob[i]-surlinedown[dataset.index_commontime[i]],
                                               surlineup[dataset.index_commontime[i]]-survmodelprob[i]], fmt='none',
                                               ecolor='k', zorder = 0)
-                        maskcross1to1 = (((surlineup[dataset.index_commontime[i]] - dataset.survprobstreat[i])>0) & ((dataset.survprobstreat[i] - surlinedown[dataset.index_commontime[i]])>0))
-                        counter = counter + sum(maskcross1to1)
-                totalpoints=sum([len(dataset.survprobstreat[k]) for k in range(dataset.ntreats)])
-                print("Point crossing 1:1 line in observed vs predicted survival probability plot: %d out of %d (%.2f%%)"%(counter, totalpoints,counter/totalpoints*100))
-                fig2.suptitle("Dataset %d"%(nd+1))
+                        if ppc_check:
+                            maskwCI = (surlineup[dataset.index_commontime[i]] - surlinedown[dataset.index_commontime[i]]) > 0
+                            maskcross1to1 = (((surlineup[dataset.index_commontime[i]] - dataset.survprobstreat[i])>0) & ((dataset.survprobstreat[i] - surlinedown[dataset.index_commontime[i]])>0))
+                            counter = counter + sum(maskcross1to1)
+                            counter_wCI = counter_wCI + sum(maskwCI)
+                            print("Dataset %d, treatment %d:"%(nd+1,i))
+                            print("Points: %d"%len(dataset.survprobstreat[i]))
+                            print("Points with confidence interval: %d"%sum(maskwCI))
+                            print("Points without confidence interval: %d"%(len(dataset.survprobstreat[i]) - sum(maskwCI)))
+                            ratioval = sum(maskcross1to1)/sum(maskwCI)*100 if sum(maskwCI)>0 else 0
+                            print("Points with CI crossing 1:1 line: %d out of %d (%.2f%%)"%(sum(maskcross1to1), sum(maskwCI),ratioval))
+                    if ppc_check:
+                        totalpoints=sum([len(dataset.survprobstreat[k]) for k in range(dataset.ntreats)])
+                        totalpoints_wCI = counter_wCI
+                        toatlpoints_woCI = totalpoints - totalpoints_wCI
+                        print("------ Summary ------")
+                        print("Total number of points: %d"%totalpoints)
+                        print("Points with confidence interval: %d"%totalpoints_wCI)
+                        print("Points without confidence interval: %d"%toatlpoints_woCI)
+                        ratioval = counter/totalpoints_wCI*100 if totalpoints_wCI>0 else 0
+                        print("Points with CI crossing 1:1 line in observed vs predicted survival probability plot: %d out of %d (%.2f%%)"%(counter, totalpoints_wCI,ratioval))
+                fig2.suptitle(titlestring)
                 fig2.tight_layout()
-            fig.suptitle("Dataset %d"%(nd+1))
+            fig.suptitle(titlestring)
             fig.tight_layout()
             plt.show()
             if savefig:
@@ -604,7 +635,7 @@ def EFSA_quality_criteria(datastruct, concstruct, model):
         results['SPPE'] = sppe
     return(results)
 
-def validate(validationfile, fitmodel, propagationset, hbfix = True, plot = True, savefig=False, figname='', extension='.png'):
+def validate(validationfile, fitmodel, propagationset, hbfix = True, plot = True, savefig=False, figname='', extension='.png', ppc_check=True):
     """
     Validate the model using a separate validation dataset and the fitted model parameters.
     This function reads the validation data, applies the fitted model to it, and calculates
@@ -629,6 +660,9 @@ def validate(validationfile, fitmodel, propagationset, hbfix = True, plot = True
         Base name for saving the figures if `savefig` is True. Default is an empty string.
     extension : str, optional
         File extension for saving the figures (e.g., '.png', '.pdf'). Default is '.png'.
+    ppc_check : bool, optional
+        If True, performs an equivalent check to a posterior predictive check (ppc is only for Bayesian statistic)
+        by analyzing the coverage of the confidence intervals. Default is True.
     Returns:
     --------
     valres : dict
@@ -641,6 +675,7 @@ def validate(validationfile, fitmodel, propagationset, hbfix = True, plot = True
     - If `plot` is True, the function generates plots of the validation data, model predictions, and confidence intervals if `propagationset` is provided.
     - The function prints detailed results for the validation data, including R², NRMSE, and SPPE values for each treatment.
     """
+    valflag = True # Add a flag to know that we are in the validation function
     tmp = readfile(validationfile)
     valconc = np.array([])
     valdata = np.array([])
@@ -670,14 +705,14 @@ def validate(validationfile, fitmodel, propagationset, hbfix = True, plot = True
     valres = EFSA_quality_criteria(np.array(valdata), np.array(valconc), model)
     if plot:
         if propagationset is None:
-            plot_data_model(fit =1,datastruct=valdata,concstruct=valconc,model=model,propagationset=None, savefig=savefig, figname=figname, extension=extension)
+            plot_data_model(fit =1,datastruct=valdata,concstruct=valconc,model=model,propagationset=None, savefig=savefig, figname=figname, extension=extension, valflag = valflag)
         else:
             # This will need to change if I want to validate multiple datasets at the same time
             fillhb = np.zeros((len(propagationset),1))
             fillhb[:] = model.parvals[-1]
             # attach the fitted hb to the propagation set maintaining the order of the other parameters
             par95 = np.hstack((propagationset[:,model.posfree<3], fillhb)) 
-            plot_data_model(fit=2,datastruct=valdata,concstruct=valconc,model=model,propagationset=par95, savefig=savefig, figname=figname, extension=extension)
+            plot_data_model(fit=2,datastruct=valdata,concstruct=valconc,model=model,propagationset=par95, savefig=savefig, figname=figname, extension=extension, valflag = valflag)
     return(valres)
 
 def _find_mfrange(timevec, damage, survtest, parsset):
@@ -1444,14 +1479,14 @@ class pyGUTSred(parspace.PyParspace):
         stop = time.time()
         print("Elapsed time for the parameter space exploration: %.4f"%(stop-start))
 
-    def plot_data_model(self,fit,modellabel='model', add_obspred=True, savefig=False, figname='', extension='.png'):
+    def plot_data_model(self,fit,modellabel='model', add_obspred=True, savefig=False, figname='', extension='.png', ppc_check=True):
         """
         Plot the data and model predictions.
         Wrapper around the generic function `plot_data_model` to visualize the fit results.
         """
         plot_data_model(fit=fit, datastruct=self.datastruct, concstruct=self.concstruct, model=self.model,
                         propagationset = self.propagationset, modellabel=modellabel, add_obspred=add_obspred,
-                        savefig=savefig, figname=figname, extension=extension)	
+                        savefig=savefig, figname=figname, extension=extension, ppc_check=ppc_check)	
 
     def EFSA_quality_criteria(self):
         """
