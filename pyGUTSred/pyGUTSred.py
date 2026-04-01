@@ -407,8 +407,6 @@ def plot_data_model(fit, datastruct, concstruct, model, propagationset,
     - The function supports saving plots to files if `savefig` is True.
     """
     if fit in [0,1,2]:
-        if ppc_check:
-            print("**** Check on CI coverage in observed vs predicted survival probability plot ****")
         for nd in range(len(datastruct)):
             titlestring = "Dataset %d. "%(nd+1)
             dataset = datastruct[nd]
@@ -475,6 +473,8 @@ def plot_data_model(fit, datastruct, concstruct, model, propagationset,
                 ax2[1].plot([0,maxdeaths],[0,maxdeaths], 'k--',lw=0.5,label='')
                 ax2[0].legend(loc='lower right')
                 if (fit>1) & (propagationset is not None):
+                    if ppc_check:
+                        print("**** Check on CI coverage in observed vs predicted survival probability plot ****")
                     counter = 0 # needed for PPC check
                     counter_wCI=0
                     for i in range(dataset.ntreats):
@@ -705,14 +705,18 @@ def validate(validationfile, fitmodel, propagationset, hbfix = True, plot = True
     valres = EFSA_quality_criteria(np.array(valdata), np.array(valconc), model)
     if plot:
         if propagationset is None:
-            plot_data_model(fit =1,datastruct=valdata,concstruct=valconc,model=model,propagationset=None, savefig=savefig, figname=figname, extension=extension, valflag = valflag)
+            plot_data_model(fit =1,datastruct=valdata,concstruct=valconc,model=model,propagationset=None, 
+                            savefig=savefig, figname=figname, extension=extension, valflag = valflag, 
+                            ppc_check=ppc_check)
         else:
             # This will need to change if I want to validate multiple datasets at the same time
             fillhb = np.zeros((len(propagationset),1))
             fillhb[:] = model.parvals[-1]
             # attach the fitted hb to the propagation set maintaining the order of the other parameters
             par95 = np.hstack((propagationset[:,model.posfree<3], fillhb)) 
-            plot_data_model(fit=2,datastruct=valdata,concstruct=valconc,model=model,propagationset=par95, savefig=savefig, figname=figname, extension=extension, valflag = valflag)
+            plot_data_model(fit=2,datastruct=valdata,concstruct=valconc,model=model,propagationset=par95, 
+                            savefig=savefig, figname=figname, extension=extension, valflag = valflag, 
+                            ppc_check=ppc_check)
     return(valres)
 
 def _find_mfrange(timevec, damage, survtest, parsset):
