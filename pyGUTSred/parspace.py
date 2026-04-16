@@ -793,7 +793,8 @@ class PyParspace:
                         if ind_low.size > 0:
                             # need to interpolate to find the exact value. Interpolation done only on the 
                             # two points around the crossing
-                            val=np.interp(0, prof_tst[ind_low-1:ind_low+1,-1], prof_tst[ind_low-1:ind_low+1,i])
+                            # because how np.interp works, the two arrays need to be flipped to have the values in increasing order
+                            val=np.interp(0, np.flip(prof_tst[ind_low-1:ind_low+1,-1]), np.flip(prof_tst[ind_low-1:ind_low+1,i]))
                             res_parspace[i,1] = (10**val*self.model.islog[self.posfree[i]] + 
                                                  val*(1-self.model.islog[self.posfree[i]]))
                     if prof_tst[-1,-1] < 0:
